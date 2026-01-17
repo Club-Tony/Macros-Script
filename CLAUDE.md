@@ -39,6 +39,7 @@ AutoHotkey v1 macro automation script providing fast clicking, key holds, autocl
 | Hotkey | Action |
 |--------|--------|
 | `Ctrl+Shift+Alt+Z` | Open macro menu |
+| `Ctrl+Alt+T` | Show hotkey help (only when menu is open) |
 | `Ctrl+Esc` | Reload script |
 | `Ctrl+Alt+P` | Toggle SendMode (Input/Play) |
 | `Esc` | Cancel/exit current macro mode |
@@ -50,3 +51,8 @@ AutoHotkey v1 macro automation script providing fast clicking, key holds, autocl
 - Uses `#Include <LibName>` for library imports from `Lib/` folder
 - Debug tooltips are currently enabled throughout - look for `ToolTip, DEBUG:` lines
 - Controller recording uses normalization with configurable deadzones (`controllerThumbDeadzone`, `controllerTriggerDeadzone`)
+
+## When Adding/Modifying Hotkeys
+
+1. **Update README.md** - Document new hotkeys in the appropriate section
+2. **Update `ShowHotkeyHelp()`** in Macros.ahk - The built-in tooltip help (Ctrl+Alt+T) should include all hotkeys
