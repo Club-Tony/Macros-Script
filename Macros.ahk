@@ -201,7 +201,7 @@ MenuTimeout:
     CloseMenu("timeout")
 return
 
-CloseMenu(reason := "")
+CloseMenu(reason := "", skipReload := false)
 {
     global menuActive
     SetTimer, MenuTimeout, Off
@@ -212,7 +212,14 @@ CloseMenu(reason := "")
         ToolTip, Timed Out
         SetTimer, HideTempTip, -3000
     }
+    ; Reload script after menu closes unless explicitly skipped (e.g., controller combo triggers)
+    if (!skipReload)
+        SetTimer, DelayedReload, -100
 }
+
+DelayedReload:
+    Reload
+return
 
 
 ControllerComboPoll:
@@ -252,7 +259,7 @@ ControllerComboPoll:
                 StopRecorder(true)
                 ClearRecorder()  ; Also clear any recorded macro data
                 if (menuActive)
-                    CloseMenu()
+                    CloseMenu("", true)  ; Skip reload for controller combo
                 ShowMacroToggledTip("All macros stopped and cleared", 1500, false)
             }
         }
@@ -277,7 +284,7 @@ ControllerComboPoll:
             ToolTip, DEBUG: Turbo combo detected! Starting turbo keyhold setup...
             SetTimer, HideTempTip, -2000
             if (menuActive)
-                CloseMenu()
+                CloseMenu("", true)  ; Skip reload for controller combo
             if (!recorderActive && !recorderPlaying)
                 StartHoldMacroSetup()
         }
@@ -292,7 +299,7 @@ ControllerComboPoll:
             ToolTip, DEBUG: Pure hold combo detected! Starting pure keyhold setup...
             SetTimer, HideTempTip, -2000
             if (menuActive)
-                CloseMenu()
+                CloseMenu("", true)  ; Skip reload for controller combo
             if (!recorderActive && !recorderPlaying)
                 StartPureHoldSetup()
         }
@@ -318,7 +325,7 @@ ControllerComboPoll:
                 return
             }
             if (menuActive)
-                CloseMenu()
+                CloseMenu("", true)  ; Skip reload for controller combo
             ; Start controller recording with suppression
             StartRecorder("controller", true)  ; true = suppress combo input
         }
