@@ -1,0 +1,97 @@
+CONTROLLER RECORDING DEBUG INSTRUCTIONS
+========================================
+
+MAJOR IMPROVEMENTS MADE:
+-------------------------
+1. Controller combo (L1+L2+R1+R2+A) now properly suppresses itself from being recorded
+2. 500ms grace period after pressing the combo prevents recording the button release
+3. Controller hotkeys now mirror keyboard behavior:
+   - L1+L2+R1+R2+A = Start/Stop recording (like F5/F6)
+   - Start button = Toggle playback (like F12)
+   - Start during playback = Pause/Resume
+   - L1+L2+R1+R2+X = Kill switch (stop all macros)
+
+I've also added debug output to diagnose why controller recording wasn't working.
+
+WHAT TO TEST:
+-------------
+
+1. RELOAD THE SCRIPT (Ctrl+Esc)
+   - You should see a tooltip immediately showing either:
+     * "DEBUG: XInput initialized successfully" (GOOD)
+     * "DEBUG: XInput FAILED to initialize" (BAD - XInput library not loading)
+
+   If you see additional tooltips about DLLs:
+     * "DEBUG: Found XInput DLLs: [list]" - Shows which DLLs were found
+     * "DEBUG: Successfully loaded: [path]" - Which DLL actually worked
+     * "DEBUG: No XInput DLLs found in system!" - XInput not installed
+     * "DEBUG: Failed to initialize any XInput DLL!" - DLLs found but won't load
+
+2. START CONTROLLER RECORDING
+   - Press Ctrl+Shift+Alt+Z to open menu
+   - Press F6 to start controller recording
+
+   You should see one of these tooltips:
+     a) "DEBUG: XInput NOT READY! Cannot record controller."
+        → XInput failed to initialize - DirectX/XInput not properly installed
+
+     b) "DEBUG: NO CONTROLLER DETECTED! Make sure controller is connected..."
+        → XInput works but no controller is connected/recognized
+
+     c) "DEBUG: Controller detected! Buttons: [number] - Starting recording..."
+        → Controller IS detected! Recording should work.
+
+3. WHILE RECORDING (if you got to step 2c)
+   - Press buttons on your controller
+   - Every 1 second you should see tooltips showing either:
+     * "DEBUG: Controller state is EMPTY (sample [count])" - Lost controller
+     * "DEBUG: Got controller state! Buttons: [number] (sample [count])" - Working!
+
+   - When you press a button, you should see:
+     * "DEBUG: First controller event recorded!" - First input captured
+     * "DEBUG: Controller state change recorded! Total events: [count]" - More inputs
+
+4. STOP RECORDING
+   - Press F6 or Esc to stop
+   - You should see:
+     * "DEBUG: Recording stopped! Total events: [number] | Has controller events: [true/false]"
+
+   The key info:
+     - Total events should be > 0 if anything was recorded
+     - Has controller events should be "1" or "true" if controller was captured
+
+WHAT EACH ERROR MEANS:
+----------------------
+
+ERROR 1: "XInput FAILED to initialize"
+  → PROBLEM: DirectX/XInput library not installed or accessible
+  → FIX: Install DirectX End-User Runtime, or copy xinput1_3.dll or xinput1_4.dll
+         to the script folder
+
+ERROR 2: "NO CONTROLLER DETECTED"
+  → PROBLEM: Controller not connected or not recognized as XInput device
+  → FIX: Make sure controller is plugged in and shows up in Windows Game Controllers
+         (joy.cpl). Some controllers need drivers or special software.
+         If using PlayStation controller, you may need DS4Windows.
+         If using non-XInput controller, it won't work with this script.
+
+ERROR 3: "Controller state is EMPTY" during recording
+  → PROBLEM: Controller disconnected or stopped responding during recording
+  → FIX: Check USB connection, try different USB port, check if controller needs charging
+
+ERROR 4: "Total events: 0" after recording
+  → PROBLEM: Recording ran but captured nothing
+  → FIX: Make sure you're actually pressing buttons during recording.
+         Check if controller is in the right mode (some have XInput/DirectInput switch)
+
+CONTROLLER REQUIREMENTS:
+------------------------
+- Must be an XInput-compatible controller (Xbox 360/One/Series controllers work natively)
+- PlayStation controllers need DS4Windows or similar wrapper
+- Generic controllers must support XInput (not just DirectInput)
+- Must show up in Windows "Set up USB game controllers" (run joy.cpl)
+
+If you need to test if your controller is XInput compatible, run joy.cpl in Windows
+and check if your controller appears and responds to button presses.
+
+After testing, report back what debug messages you see!

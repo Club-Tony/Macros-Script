@@ -1,0 +1,195 @@
+CONTROLLER RECORDING FLOW DIAGRAM
+==================================
+
+BEFORE THE FIX:
+---------------
+
+Press L1+L2+R1+R2+A
+       ↓
+Recording starts immediately
+       ↓
+[PROBLEM] Combo buttons are recorded as events:
+  Event 1: L1+L2+R1+R2+A pressed (buttons: 0x1330, triggers: 255,255)
+  Event 2: Buttons released (buttons: 0x0000, triggers: 0,0)
+       ↓
+User presses actual buttons they want to record
+  Event 3: X button pressed
+  Event 4: X button released
+       ↓
+Stop recording
+       ↓
+Start playback
+       ↓
+[PROBLEM] Playback event 1 triggers the combo!
+       ↓
+Recording starts again (infinite loop)
+
+
+AFTER THE FIX:
+--------------
+
+Press L1+L2+R1+R2+A
+       ↓
+Recording starts with SUPPRESSION enabled
+       ↓
+Suppression active for 500ms
+  Sample 1-25: ← IGNORED (suppression active)
+       ↓       Controller state NOT recorded
+       ↓       Countdown shown: "0.4s remaining"
+       ↓
+  Sample 26: Suppression ends
+       ↓      "Suppression ended - now recording controller input!"
+       ↓
+User presses actual buttons they want to record
+  Sample 27: X button pressed
+       ↓      Event 1: X pressed ← FIRST EVENT RECORDED
+  Sample 30: X button released
+       ↓      Event 2: X released
+       ↓
+Stop recording with L1+L2+R1+R2+A
+       ↓
+"Recording stopped! Total events: 2"
+       ↓
+Start playback with Start button
+       ↓
+Playback event 1: X pressed ← NO COMBO TRIGGERED!
+Playback event 2: X released
+       ↓
+Playback completes successfully ✓
+
+
+TIMELINE VISUALIZATION:
+-----------------------
+
+Time (ms)    Action                          Recorded?
+--------     ------                          ---------
+0            Press L1+L2+R1+R2+A             NO (triggers recording)
+20           Sample 1: Combo still held      NO (suppression)
+40           Sample 2: Combo still held      NO (suppression)
+60           Sample 3: Combo still held      NO (suppression)
+...          ...                             ...
+200          Release combo buttons           NO (suppression)
+220          Sample 11: Neutral state        NO (suppression)
+...          ...                             ...
+480          Sample 24: Still suppressed     NO (suppression)
+500          Sample 25: Suppression ends     - (transition)
+520          Sample 26: Ready to record      - (waiting for input)
+540          Press X button                  YES ← First recorded event!
+560          Sample 27: X pressed            YES
+580          Sample 28: X pressed            - (no change)
+600          Release X button                YES ← Second recorded event!
+620          Sample 29: X released           YES
+
+
+COMPARISON: KEYBOARD vs CONTROLLER
+-----------------------------------
+
+KEYBOARD RECORDING (F5):
+  1. Press F5
+  2. #If context prevents F5 from being recorded (hotkey filter)
+  3. Recording starts immediately
+  4. User types keys
+  5. Keys are recorded
+  6. Press F5 or Esc to stop
+
+CONTROLLER RECORDING (L1+L2+R1+R2+A):
+  1. Press L1+L2+R1+R2+A
+  2. Suppression prevents combo from being recorded (time-based filter)
+  3. Recording starts but input ignored for 500ms
+  4. User presses buttons after 500ms
+  5. Buttons are recorded
+  6. Press L1+L2+R1+R2+A to stop
+
+Both achieve the same goal: prevent the trigger from being recorded!
+
+
+CONTROLLER HOTKEY STATE MACHINE:
+---------------------------------
+
+STATE: Not Recording, Not Playing
+  ↓
+  ├─ Press L1+L2+R1+R2+A → START RECORDING (with suppression)
+  ├─ Press Start button  → (no action, no recording exists)
+  └─ Press L1+L2+R1+R2+X → (no action, nothing to stop)
+
+STATE: Recording Active
+  ↓
+  ├─ Press L1+L2+R1+R2+A → STOP RECORDING
+  ├─ Press Start button  → (ignored, can't play while recording)
+  ├─ Press Share/Back    → CANCEL RECORDING
+  └─ Press L1+L2+R1+R2+X → CANCEL RECORDING
+
+STATE: Recording Exists, Not Playing
+  ↓
+  ├─ Press L1+L2+R1+R2+A → START RECORDING (new recording, replaces old)
+  ├─ Press Start button  → START PLAYBACK
+  └─ Press L1+L2+R1+R2+X → CLEAR RECORDING
+
+STATE: Playing Back
+  ↓
+  ├─ Press L1+L2+R1+R2+A → STOP PLAYBACK
+  ├─ Press Start button  → PAUSE/RESUME PLAYBACK
+  └─ Press L1+L2+R1+R2+X → STOP PLAYBACK
+
+
+DEBUG MESSAGE FLOW:
+-------------------
+
+Script Startup:
+  "DEBUG: Found XInput DLLs: [list]"
+  "DEBUG: Successfully loaded: [dll]"
+  "DEBUG: XInput initialized successfully"
+
+Press L1+L2+R1+R2+A (start recording):
+  "DEBUG: Controller detected! Buttons: 4915 - Starting recording..."
+  "DEBUG: Controller input suppressed for 500ms (combo grace period)"
+  "Recording controller... (L1+L2+R1+R2+A to stop)"
+
+During suppression (every 0.5s):
+  "DEBUG: Suppression active (0.4s remaining)"
+  "DEBUG: Suppression active (0.2s remaining)"
+
+Suppression ends:
+  "DEBUG: Suppression ended - now recording controller input!"
+
+During recording (every 1s):
+  "DEBUG: Got controller state! Buttons: 0 (sample 50)"
+  "DEBUG: Got controller state! Buttons: 4096 (sample 100)"
+
+First button press:
+  "DEBUG: First controller event recorded!"
+
+Subsequent button presses:
+  "DEBUG: Controller state change recorded! Total events: 1"
+
+Press L1+L2+R1+R2+A (stop recording):
+  "DEBUG: Recording stopped! Total events: 15 | Has controller events: 1"
+  "Recording stopped - F12 toggles playback"
+
+Press Start button (start playback):
+  "Playing recorded macro (F12 to stop)"
+
+
+COMMON BUTTON VALUES:
+---------------------
+
+Buttons field is a bitmask (hexadecimal):
+
+0x0000 (0)       No buttons pressed
+0x1000 (4096)    A/Cross button
+0x2000 (8192)    B/Circle button
+0x4000 (16384)   X/Square button
+0x8000 (32768)   Y/Triangle button
+0x0100 (256)     Left Shoulder (L1/LB)
+0x0200 (512)     Right Shoulder (R1/RB)
+0x1330 (4915)    L1+L2+R1+R2+A combo
+                 (256 + 512 + 4096 + triggers)
+
+Triggers (0-255 each):
+  Left Trigger (L2/LT): 0 = not pressed, 255 = fully pressed
+  Right Trigger (R2/RT): 0 = not pressed, 255 = fully pressed
+
+When combo pressed:
+  Buttons: 0x1330 (L1 + R1 + A)
+  LeftTrigger: 255 (L2 fully pressed)
+  RightTrigger: 255 (R2 fully pressed)
