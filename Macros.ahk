@@ -23,10 +23,16 @@ holdMacroOn := false
 holdMacroKey := ""
 holdMacroBoundKey := ""
 holdMacroRepeatMs := 40
+holdMacroIsController := false
+holdMacroControllerButton := 0
+holdMacroControllerLatched := false
 holdHoldReady := false
 holdHoldOn := false
 holdHoldKey := ""
 holdHoldBoundKey := ""
+holdHoldIsController := false
+holdHoldControllerButton := 0
+holdHoldControllerLatched := false
 autoClickReady := false
 autoClickOn := false
 autoClickInterval := 1000
@@ -559,11 +565,37 @@ HideTempTip:
     ToolTip
 return
 
+; Global to pass XInput button constant from PromptHoldKey to caller
+promptHoldKeyXInputButton := 0
+promptHoldKeyIsController := false
+
 PromptHoldKey(promptText)
 {
     global XINPUT_GAMEPAD_A, XINPUT_GAMEPAD_B, XINPUT_GAMEPAD_X, XINPUT_GAMEPAD_Y
     global XINPUT_GAMEPAD_LEFT_SHOULDER, XINPUT_GAMEPAD_RIGHT_SHOULDER
     global XINPUT_GAMEPAD_DPAD_UP, XINPUT_GAMEPAD_DPAD_DOWN, XINPUT_GAMEPAD_DPAD_LEFT, XINPUT_GAMEPAD_DPAD_RIGHT
+    global promptHoldKeyXInputButton, promptHoldKeyIsController
+
+    ; Reset globals
+    promptHoldKeyXInputButton := 0
+    promptHoldKeyIsController := false
+
+    ; Wait for user to release any held controller buttons before accepting input
+    ; This prevents the combo buttons (L1+L2+R1+R2) from being detected as the key to hold
+    releaseStartTime := A_TickCount
+    ToolTip, Release all controller buttons...
+    Loop
+    {
+        ctrlState := ControllerGetState()
+        if (!ctrlState || ctrlState.Buttons = 0)
+            break
+        if (A_TickCount - releaseStartTime > 5000)  ; 5s timeout for release
+        {
+            ToolTip
+            return ""
+        }
+        Sleep, 50
+    }
 
     ToolTip, %promptText%`n(Controller buttons also supported)
     SetTimer, HideTempTip, -15000
@@ -576,6 +608,7 @@ PromptHoldKey(promptText)
     startTime := A_TickCount
     controllerDetected := false
     detectedButton := ""
+    detectedXInputButton := 0
 
     ; Poll for both keyboard and controller input
     Loop
@@ -595,32 +628,64 @@ PromptHoldKey(promptText)
         ctrlState := ControllerGetState()
         if (ctrlState && ctrlState.Buttons != 0)
         {
-            ; Map controller buttons to names
+            ; Map controller buttons to names AND store XInput constant
             if (ctrlState.Buttons & XINPUT_GAMEPAD_A)
-                detectedButton := "Joy1"
+            {
+                detectedButton := "A (Cross)"
+                detectedXInputButton := XINPUT_GAMEPAD_A
+            }
             else if (ctrlState.Buttons & XINPUT_GAMEPAD_B)
-                detectedButton := "Joy2"
+            {
+                detectedButton := "B (Circle)"
+                detectedXInputButton := XINPUT_GAMEPAD_B
+            }
             else if (ctrlState.Buttons & XINPUT_GAMEPAD_X)
-                detectedButton := "Joy3"
+            {
+                detectedButton := "X (Square)"
+                detectedXInputButton := XINPUT_GAMEPAD_X
+            }
             else if (ctrlState.Buttons & XINPUT_GAMEPAD_Y)
-                detectedButton := "Joy4"
+            {
+                detectedButton := "Y (Triangle)"
+                detectedXInputButton := XINPUT_GAMEPAD_Y
+            }
             else if (ctrlState.Buttons & XINPUT_GAMEPAD_LEFT_SHOULDER)
-                detectedButton := "Joy5"
+            {
+                detectedButton := "LB (L1)"
+                detectedXInputButton := XINPUT_GAMEPAD_LEFT_SHOULDER
+            }
             else if (ctrlState.Buttons & XINPUT_GAMEPAD_RIGHT_SHOULDER)
-                detectedButton := "Joy6"
+            {
+                detectedButton := "RB (R1)"
+                detectedXInputButton := XINPUT_GAMEPAD_RIGHT_SHOULDER
+            }
             else if (ctrlState.Buttons & XINPUT_GAMEPAD_DPAD_UP)
-                detectedButton := "JoyPOVUp"
+            {
+                detectedButton := "D-Pad Up"
+                detectedXInputButton := XINPUT_GAMEPAD_DPAD_UP
+            }
             else if (ctrlState.Buttons & XINPUT_GAMEPAD_DPAD_DOWN)
-                detectedButton := "JoyPOVDown"
+            {
+                detectedButton := "D-Pad Down"
+                detectedXInputButton := XINPUT_GAMEPAD_DPAD_DOWN
+            }
             else if (ctrlState.Buttons & XINPUT_GAMEPAD_DPAD_LEFT)
-                detectedButton := "JoyPOVLeft"
+            {
+                detectedButton := "D-Pad Left"
+                detectedXInputButton := XINPUT_GAMEPAD_DPAD_LEFT
+            }
             else if (ctrlState.Buttons & XINPUT_GAMEPAD_DPAD_RIGHT)
-                detectedButton := "JoyPOVRight"
+            {
+                detectedButton := "D-Pad Right"
+                detectedXInputButton := XINPUT_GAMEPAD_DPAD_RIGHT
+            }
 
             if (detectedButton != "")
             {
                 ih.Stop()
                 holdKey := detectedButton
+                promptHoldKeyXInputButton := detectedXInputButton
+                promptHoldKeyIsController := true
                 controllerDetected := true
                 ToolTip, Controller button detected: %holdKey%
                 Sleep, 1000
@@ -672,6 +737,8 @@ return
 StartHoldMacroSetup()
 {
     global holdMacroReady, holdMacroOn, holdMacroKey, holdMacroBoundKey, holdMacroRepeatMs
+    global holdMacroIsController, holdMacroControllerButton, holdMacroControllerLatched
+    global promptHoldKeyXInputButton, promptHoldKeyIsController
     ; reset any existing hold macro
     DeactivateHoldMacro(true)
     InputBox, repeatMs, Turbo Hold, % "Enter repeat interval in ms (default " holdMacroRepeatMs ").", , , , , , , 10, %holdMacroRepeatMs%
@@ -686,18 +753,34 @@ StartHoldMacroSetup()
             holdMacroRepeatMs := repeatMs
         }
     }
-    tooltipText := "Input key to hold down (15s timeout)."
+    tooltipText := "Input key to turbo (15s timeout)."
     holdKey := PromptHoldKey(tooltipText)
     if (holdKey = "")
     {
-        ShowMacroToggledTip("Keyhold canceled (invalid key)")
+        ShowMacroToggledTip("Turbo canceled (invalid key)")
         return
     }
     holdMacroKey := holdKey
-    BindHoldHotkey(holdMacroKey, "On")
-    holdMacroReady := true
-    holdMacroOn := false
-    Gosub, HoldMacroToggle  ; first press activates hold
+    holdMacroIsController := promptHoldKeyIsController
+    holdMacroControllerButton := promptHoldKeyXInputButton
+    holdMacroControllerLatched := false
+
+    if (holdMacroIsController)
+    {
+        ; For controller buttons, use XInput polling instead of AHK hotkey
+        SetTimer, HoldMacroControllerPoll, 50
+        holdMacroReady := true
+        holdMacroOn := false
+        ShowMacroToggledTip("Turbo ready: " holdKey " (press again to toggle)")
+    }
+    else
+    {
+        ; For keyboard keys, use standard hotkey binding
+        BindHoldHotkey(holdMacroKey, "On")
+        holdMacroReady := true
+        holdMacroOn := false
+        Gosub, HoldMacroToggle  ; first press activates hold
+    }
 }
 
 BindHoldHotkey(key, mode := "On")
@@ -715,36 +798,66 @@ BindHoldHotkey(key, mode := "On")
 }
 
 HoldMacroToggle:
-    global holdMacroReady, holdMacroOn, holdMacroKey, holdMacroRepeatMs
+    global holdMacroReady, holdMacroOn, holdMacroKey, holdMacroRepeatMs, holdMacroIsController
     if (!holdMacroReady || holdMacroKey = "")
         return
     if (holdMacroOn)
     {
-        Send, {%holdMacroKey% up}
+        if (!holdMacroIsController)
+            Send, {%holdMacroKey% up}
         holdMacroOn := false
         SetTimer, HoldKeyRepeat, Off
-        ShowMacroToggledTip("Keyup", 1000, false)
+        ShowMacroToggledTip("Turbo OFF: " holdMacroKey, 1000, false)
     }
     else
     {
-        Send, {%holdMacroKey% down}
+        if (!holdMacroIsController)
+            Send, {%holdMacroKey% down}
         holdMacroOn := true
         SetTimer, HoldKeyRepeat, % holdMacroRepeatMs
-        ShowMacroToggledTip("Keydown", 1000, false)
+        ShowMacroToggledTip("Turbo ON: " holdMacroKey, 1000, false)
+    }
+return
+
+; Poll controller for turbo hold toggle (used when bound key is a controller button)
+HoldMacroControllerPoll:
+    global holdMacroReady, holdMacroControllerButton, holdMacroControllerLatched
+    if (!holdMacroReady || holdMacroControllerButton = 0)
+        return
+    ctrlState := ControllerGetState()
+    if (!ctrlState)
+        return
+    buttonPressed := (ctrlState.Buttons & holdMacroControllerButton) != 0
+    if (buttonPressed)
+    {
+        if (!holdMacroControllerLatched)
+        {
+            holdMacroControllerLatched := true
+            Gosub, HoldMacroToggle
+        }
+    }
+    else
+    {
+        holdMacroControllerLatched := false
     }
 return
 
 DeactivateHoldMacro(silent := false)
 {
     global holdMacroReady, holdMacroOn, holdMacroKey, holdMacroBoundKey
+    global holdMacroIsController, holdMacroControllerButton, holdMacroControllerLatched
     if (!holdMacroReady && !holdMacroOn)
         return
-    if (holdMacroOn && holdMacroKey != "")
+    if (holdMacroOn && holdMacroKey != "" && !holdMacroIsController)
         Send, {%holdMacroKey% up}
     SetTimer, HoldKeyRepeat, Off
+    SetTimer, HoldMacroControllerPoll, Off
     holdMacroOn := false
     holdMacroReady := false
     holdMacroKey := ""
+    holdMacroIsController := false
+    holdMacroControllerButton := 0
+    holdMacroControllerLatched := false
     BindHoldHotkey("", "Off")
     if (!silent)
         ShowMacroToggledTip("Macro Toggled Off")
@@ -791,25 +904,28 @@ StartRecorder(mode := "combined", suppressCombo := false)
         recorderControllerSuppressUntil := 0
     }
 
-    ; DEBUG: Check XInput and controller state before starting
+    ; Check XInput and controller state - gracefully degrade if unavailable
     if (!EnsureXInputReady())
     {
-        ToolTip, DEBUG: XInput NOT READY! Cannot record controller.
+        ToolTip, DEBUG: XInput NOT READY! Recording keyboard/mouse only.
         SetTimer, HideDebugStartupTip, -3000
-        return
-    }
-    testState := ControllerGetState()
-    if (!testState)
-    {
-        ToolTip, DEBUG: NO CONTROLLER DETECTED! Make sure controller is connected and recognized by Windows.
-        SetTimer, HideDebugStartupTip, -5000
-        return
+        recorderControllerEnabled := false
     }
     else
     {
-        testButtons := testState.Buttons
-        ToolTip, DEBUG: Controller detected! Buttons: %testButtons% - Starting recording...
-        SetTimer, HideDebugStartupTip, -2000
+        testState := ControllerGetState()
+        if (!testState)
+        {
+            ToolTip, DEBUG: NO CONTROLLER DETECTED! Recording keyboard/mouse only.
+            SetTimer, HideDebugStartupTip, -3000
+            recorderControllerEnabled := false
+        }
+        else
+        {
+            testButtons := testState.Buttons
+            ToolTip, DEBUG: Controller detected! Buttons: %testButtons% - Starting recording...
+            SetTimer, HideDebugStartupTip, -2000
+        }
     }
 
     if (recorderKbMouseEnabled)
@@ -876,10 +992,12 @@ StopPlayback(silent := false)
     global recorderPaused, recorderPlayIndex
     if (!recorderPlaying)
         return
+    ; Set flag first to signal any running loop to exit
     recorderPlaying := false
     recorderPaused := false
-    recorderPlayIndex := 1
+    ; Disable timer before resetting index to prevent race condition
     SetTimer, RecorderPlayNext, Off
+    recorderPlayIndex := 1
     if (recorderHasControllerEvents)
         ControllerResetVJoyState()
     if (!silent)
@@ -907,11 +1025,22 @@ TogglePlaybackPause()
 ClearRecorder()
 {
     global recorderEvents, recorderStart, recorderLast, recorderHasControllerEvents, recorderSendMode
+    global recorderKbMouseEnabled, recorderControllerEnabled, recorderControllerSuppress
+    global recorderControllerSuppressUntil, recorderControllerPrevState
+    global recorderPlayIndex, recorderPaused
     recorderEvents := []
     recorderStart := 0
     recorderLast := 0
     recorderHasControllerEvents := false
     recorderSendMode := ""
+    ; Reset all recording/playback state to defaults
+    recorderKbMouseEnabled := true
+    recorderControllerEnabled := true
+    recorderControllerSuppress := false
+    recorderControllerSuppressUntil := 0
+    recorderControllerPrevState := ""
+    recorderPlayIndex := 1
+    recorderPaused := false
     ShowMacroToggledTip("Macro Toggled Off")
 }
 
@@ -973,9 +1102,12 @@ RecorderPlayNext:
         }
         idx++
     }
-    recorderPlayIndex := 1
+    ; Only reset index and reschedule if still playing (state may have changed during Sleep)
     if (recorderPlaying)
+    {
+        recorderPlayIndex := 1
         SetTimer, RecorderPlayNext, -1
+    }
 return
 
 SendEventOrInput(seq, state := "")
@@ -1090,11 +1222,19 @@ return
 FinalizeRecording()
 {
     global recorderActive, recorderEvents, recorderSuppressStopTip, recorderHasControllerEvents
+    global recorderKbMouseEnabled, recorderControllerEnabled, recorderControllerSuppress
+    global recorderControllerSuppressUntil, recorderControllerPrevState
     if (!recorderActive)
         return
     recorderActive := false
     SetTimer, RecorderSampleMouse, Off
     SetTimer, RecorderSampleController, Off
+    ; Reset recording state variables to defaults for next session
+    recorderKbMouseEnabled := true
+    recorderControllerEnabled := true
+    recorderControllerSuppress := false
+    recorderControllerSuppressUntil := 0
+    recorderControllerPrevState := ""
 
     ; DEBUG: Show recording results and breakdown
     totalEvents := recorderEvents.MaxIndex()
@@ -1131,7 +1271,10 @@ FinalizeRecording()
 
 RecorderAddEvent(type, code := "", state := "", x := "", y := "", payload := "")
 {
-    global recorderEvents, recorderLast
+    global recorderEvents, recorderLast, recorderActive
+    ; Guard: Ignore events if recording was stopped (hotkey context may not have refreshed yet)
+    if (!recorderActive)
+        return
     now := A_TickCount
     delay := now - recorderLast
     recorderLast := now
@@ -1158,6 +1301,8 @@ RecorderAddEvent(type, code := "", state := "", x := "", y := "", payload := "")
 StartPureHoldSetup()
 {
     global holdHoldReady, holdHoldOn, holdHoldKey, holdHoldBoundKey
+    global holdHoldIsController, holdHoldControllerButton, holdHoldControllerLatched
+    global promptHoldKeyXInputButton, promptHoldKeyIsController
     DeactivatePureHold(true)
     tooltipText := "Input key to hold down (15s timeout)."
     holdKey := PromptHoldKey(tooltipText)
@@ -1167,10 +1312,26 @@ StartPureHoldSetup()
         return
     }
     holdHoldKey := holdKey
-    BindPureHoldHotkey(holdHoldKey, "On")
-    holdHoldReady := true
-    holdHoldOn := false
-    Gosub, PureHoldToggle
+    holdHoldIsController := promptHoldKeyIsController
+    holdHoldControllerButton := promptHoldKeyXInputButton
+    holdHoldControllerLatched := false
+
+    if (holdHoldIsController)
+    {
+        ; For controller buttons, use XInput polling instead of AHK hotkey
+        SetTimer, PureHoldControllerPoll, 50
+        holdHoldReady := true
+        holdHoldOn := false
+        ShowMacroToggledTip("Pure Hold ready: " holdKey " (press again to toggle)")
+    }
+    else
+    {
+        ; For keyboard keys, use standard hotkey binding
+        BindPureHoldHotkey(holdHoldKey, "On")
+        holdHoldReady := true
+        holdHoldOn := false
+        Gosub, PureHoldToggle
+    }
 }
 
 BindPureHoldHotkey(key, mode := "On")
@@ -1188,33 +1349,63 @@ BindPureHoldHotkey(key, mode := "On")
 }
 
 PureHoldToggle:
-    global holdHoldReady, holdHoldOn, holdHoldKey
+    global holdHoldReady, holdHoldOn, holdHoldKey, holdHoldIsController
     if (!holdHoldReady || holdHoldKey = "")
         return
     if (holdHoldOn)
     {
-        Send, {%holdHoldKey% up}
+        if (!holdHoldIsController)
+            Send, {%holdHoldKey% up}
         holdHoldOn := false
-        ShowMacroToggledTip("Keyup", 1000, false)
+        ShowMacroToggledTip("Hold OFF: " holdHoldKey, 1000, false)
     }
     else
     {
-        Send, {%holdHoldKey% down}
+        if (!holdHoldIsController)
+            Send, {%holdHoldKey% down}
         holdHoldOn := true
-        ShowMacroToggledTip("Keydown", 1000, false)
+        ShowMacroToggledTip("Hold ON: " holdHoldKey, 1000, false)
+    }
+return
+
+; Poll controller for pure hold toggle (used when bound key is a controller button)
+PureHoldControllerPoll:
+    global holdHoldReady, holdHoldControllerButton, holdHoldControllerLatched
+    if (!holdHoldReady || holdHoldControllerButton = 0)
+        return
+    ctrlState := ControllerGetState()
+    if (!ctrlState)
+        return
+    buttonPressed := (ctrlState.Buttons & holdHoldControllerButton) != 0
+    if (buttonPressed)
+    {
+        if (!holdHoldControllerLatched)
+        {
+            holdHoldControllerLatched := true
+            Gosub, PureHoldToggle
+        }
+    }
+    else
+    {
+        holdHoldControllerLatched := false
     }
 return
 
 DeactivatePureHold(silent := false)
 {
     global holdHoldReady, holdHoldOn, holdHoldKey, holdHoldBoundKey
+    global holdHoldIsController, holdHoldControllerButton, holdHoldControllerLatched
     if (!holdHoldReady && !holdHoldOn)
         return
-    if (holdHoldOn && holdHoldKey != "")
+    if (holdHoldOn && holdHoldKey != "" && !holdHoldIsController)
         Send, {%holdHoldKey% up}
+    SetTimer, PureHoldControllerPoll, Off
     holdHoldOn := false
     holdHoldReady := false
     holdHoldKey := ""
+    holdHoldIsController := false
+    holdHoldControllerButton := 0
+    holdHoldControllerLatched := false
     BindPureHoldHotkey("", "Off")
     if (!silent)
         ShowMacroToggledTip("Macro Toggled Off")
