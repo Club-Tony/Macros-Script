@@ -20,12 +20,12 @@ Add a shortcut to `Macros.ahk` in your Startup folder (`Win+R` → `Shell:Startu
 
 ## Controller Combos (vJoy + XInput)
 
-- `L1+L2+R1+R2+A` — start/stop recording or toggle playback
+All controller functions require the L1+L2+R1+R2 combo to prevent accidental in-game triggers:
+
+- `L1+L2+R1+R2+A` — start recording; press again to stop and auto-start looping playback; press again to stop playback
 - `L1+L2+R1+R2+B` — start turbo key hold
 - `L1+L2+R1+R2+Y` — start pure key hold
 - `L1+L2+R1+R2+X` — kill switch (stop and clear all macros)
-- `Start/Options` — toggle playback or pause/resume during playback
-- `Share/Back` — cancel recording
 
 ## Macro Recording (F5)
 
