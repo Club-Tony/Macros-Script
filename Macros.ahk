@@ -91,9 +91,6 @@ SetTimer, ControllerInputBoxHelper, 100  ; Monitor for InputBoxes and allow A bu
 
 return
 
-
-^Esc::Reload
-
 ^!p::
     ToggleSendMode()
 return
