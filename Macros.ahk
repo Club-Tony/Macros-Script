@@ -1,6 +1,7 @@
 #Requires AutoHotkey v1
 #NoEnv ; Prevents Unnecessary Environment Variable lookup
 #SingleInstance, Force ; Removes script already open warning when reloading scripts
+#InstallKeybdHook
 #UseHook
 #Warn
 #Warn, LocalSameAsGlobal, Off
