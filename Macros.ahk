@@ -3,6 +3,7 @@
 #SingleInstance, Force ; Removes script already open warning when reloading scripts
 #InstallKeybdHook
 #UseHook
+#InputLevel 1  ; Only respond to physical keypresses, improves game compatibility
 #Warn
 #Warn, LocalSameAsGlobal, Off
 #Warn, Unreachable, Off
@@ -97,7 +98,7 @@ return
 return
 
 ; Ctrl+Shift+Alt+Z shows a temporary menu for staged actions.
-^+!z::
+$^+!z::
     if (menuActive)
         return
     DeactivateClickMacro(true)
@@ -660,6 +661,21 @@ PromptHoldKey(promptText)
                 holdKey := ih.EndKey
             holdKey := GetKeyName(holdKey)
             break
+        }
+
+        ; Check modifier keys (InputHook doesn't capture these reliably)
+        modifierKeys := ["LShift", "RShift", "LControl", "RControl", "LAlt", "RAlt"]
+        for _, modKey in modifierKeys
+        {
+            if (GetKeyState(modKey, "P"))
+            {
+                ih.Stop()
+                holdKey := modKey
+                ToolTip, Modifier key detected: %holdKey%
+                KeyWait, %modKey%  ; Wait for release before returning
+                Sleep, 200
+                break 2  ; Exit both for-loop and main Loop
+            }
         }
 
         ; Check controller input
