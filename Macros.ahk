@@ -49,6 +49,11 @@ recorderEvents := []
 recorderStart := 0
 recorderLast := 0
 recorderMouseSampleMs := 40
+recorderMouseCoordSpace := "screen"
+recorderTargetHwnd := 0
+recorderTargetExe := ""
+recorderTargetClientW := 0
+recorderTargetClientH := 0
 recorderControllerSampleMs := 20
 recorderKbMouseEnabled := true
 recorderControllerEnabled := true
@@ -146,6 +151,11 @@ F5::
     CloseMenu("", true)  ; Skip reload - starting a function
     StartRecorder()
 return
+
+F6::
+    CloseMenu("", true)  ; Skip reload - starting a function
+    StartRecorder("combined", false, "client")
+return
 #If
 
 #If (clickMacroOn)
@@ -173,6 +183,7 @@ return
 #If (recorderActive && !recorderPlaying)
 Esc::
 F5::
+F6::
     FinalizeRecording()
 return
 #If
@@ -200,11 +211,14 @@ return
 
 AutoStartControllerPlayback:
     ; Auto-start looping playback after controller recording stops
-    global recorderEvents, recorderPlaying
+    global recorderEvents, recorderPlaying, recorderMouseCoordSpace, recorderTargetExe
     if (recorderEvents.MaxIndex() != "" && !recorderPlaying)
     {
         StartPlayback()
-        ShowMacroToggledTip("Auto-started playback (L1+L2+R1+R2+A to stop, X to clear)", 3000, true)
+        if (recorderMouseCoordSpace = "client")
+            ShowMacroToggledTip("Auto-started playback (client-locked: " recorderTargetExe ") - combo+A stop, X clear", 3000, true)
+        else
+            ShowMacroToggledTip("Auto-started playback (L1+L2+R1+R2+A to stop, X to clear)", 3000, true)
     }
 return
 
@@ -333,8 +347,8 @@ ControllerComboPoll:
             }
             if (menuActive)
                 CloseMenu("", true)  ; Skip reload for controller combo
-            ; Start controller recording with suppression
-            StartRecorder("controller", true)  ; true = suppress combo input
+            ; Start combined recording with client-lock auto-detection (falls back to screen if no valid window)
+            StartRecorder("combined", true, "client")
         }
     }
     else
@@ -458,12 +472,13 @@ ShowHotkeyHelp()
         . "Ctrl+Esc - Reload script`n"
         . "Ctrl+Alt+T - Show this help`n"
         . "`n"
-        . "Menu Options (F1-F5):`n"
+        . "Menu Options (F1-F6):`n"
         . "F1 - F12 => Left click`n"
         . "F2 - Autoclicker (F12 toggles)`n"
         . "F3 - Turbo keyhold (rapid repeat)`n"
         . "F4 - Pure key hold (toggle down/up)`n"
-        . "F5 - Record macro`n"
+        . "F5 - Record macro (screen coords)`n"
+        . "F6 - Record macro (client-locked mouse)`n"
         . "`n"
         . "Recording/Playback:`n"
         . "F5 - Start/stop recording`n"
@@ -497,7 +512,8 @@ MenuTooltipText()
         . "F4 - Stage pure key hold`n"
     if (ctrlSupport)
     {
-        text .= "F5 - Record Macro (kb/mouse + controller)`n"
+        text .= "F5 - Record Macro (screen coords, kb/mouse + controller)`n"
+            . "F6 - Record Macro (client-locked mouse moves)`n"
             . "L1+L2+R1+R2+A - Record/stop (auto-plays), stop playback`n"
             . "L1+L2+R1+R2+B - Start turbo keyhold`n"
             . "L1+L2+R1+R2+Y - Start pure key hold`n"
@@ -508,7 +524,8 @@ MenuTooltipText()
     }
     else
     {
-        text .= "F5 - Record Macro (kb/mouse)`n"
+        text .= "F5 - Record Macro (screen coords, kb/mouse)`n"
+            . "F6 - Record Macro (client-locked mouse moves)`n"
         if (!VJoyAvailable())
             text .= "vJoy driver not installed, limited to keyboard/mouse recording/playback`n"
                 . "Install vJoy: run vJoySetup.exe, then reboot`n"
@@ -908,11 +925,12 @@ HoldKeyRepeat:
     Send, {%holdMacroKey%}
 return
 
-StartRecorder(mode := "combined", suppressCombo := false)
+StartRecorder(mode := "combined", suppressCombo := false, mouseCoordSpace := "screen")
 {
     global recorderActive, recorderPlaying, recorderEvents, recorderStart, recorderLast, recorderMouseSampleMs
     global recorderControllerSampleMs, recorderKbMouseEnabled, recorderControllerEnabled
     global recorderControllerPrevState, recorderHasControllerEvents, recorderSendMode
+    global recorderMouseCoordSpace, recorderTargetHwnd, recorderTargetExe, recorderTargetClientW, recorderTargetClientH
     global sendMode
     global recorderControllerSuppress, recorderControllerSuppressUntil
     StopRecorder(true)
@@ -926,6 +944,24 @@ StartRecorder(mode := "combined", suppressCombo := false)
     recorderKbMouseEnabled := (mode = "combined")
     recorderControllerEnabled := true
     recorderControllerPrevState := ""
+
+    coordRequested := (mouseCoordSpace = "client")
+    recorderMouseCoordSpace := "screen"
+    recorderTargetHwnd := 0
+    recorderTargetExe := ""
+    recorderTargetClientW := 0
+    recorderTargetClientH := 0
+    if (coordRequested)
+    {
+        recorderTargetHwnd := WinExist("A")
+        if (recorderTargetHwnd)
+            WinGet, recorderTargetExe, ProcessName, ahk_id %recorderTargetHwnd%
+        if (recorderTargetHwnd && recorderTargetExe != ""
+            && Recorder_GetClientSize(recorderTargetHwnd, recorderTargetClientW, recorderTargetClientH))
+        {
+            recorderMouseCoordSpace := "client"
+        }
+    }
 
     ; Suppress controller input for 500ms if triggered by combo (prevents recording the combo itself)
     if (suppressCombo)
@@ -960,6 +996,10 @@ StartRecorder(mode := "combined", suppressCombo := false)
     SetTimer, RecorderSampleController, % recorderControllerSampleMs
     if (mode = "controller")
         ShowMacroToggledTip("Recording controller... (L1+L2+R1+R2+A to stop)", 3000, true)
+    else if (recorderMouseCoordSpace = "client")
+        ShowMacroToggledTip("Recording macro (client-locked: " recorderTargetExe ")... F5 to stop", 3000, true)
+    else if (coordRequested)
+        ShowMacroToggledTip("Recording macro... F5 to stop (client lock unavailable)", 3000, true)
     else
         ShowMacroToggledTip("Recording macro... F5 to stop", 3000, true)
     ; install low-level hooks for keys via hotkey prefix below
@@ -984,6 +1024,7 @@ StartPlayback()
 {
     global recorderEvents, recorderPlaying, recorderHasControllerEvents
     global recorderPaused, recorderPlayIndex
+    global recorderMouseCoordSpace, recorderTargetExe
     if (recorderPlaying)
         return
     if (recorderEvents.MaxIndex() = "")
@@ -996,10 +1037,22 @@ StartPlayback()
         ShowMacroToggledTip("vJoy not ready - controller playback unavailable", 3000, false)
         return
     }
+    if (recorderMouseCoordSpace = "client")
+    {
+        WinGet, activeExe, ProcessName, A
+        if (activeExe = "" || activeExe != recorderTargetExe)
+        {
+            ShowMacroToggledTip("Focus " recorderTargetExe " and press F12 again", 3000, false)
+            return
+        }
+    }
     recorderPlaying := true
     recorderPaused := false
     recorderPlayIndex := 1
-    ShowMacroToggledTip("Playing recorded macro (F12 to stop)")
+    if (recorderMouseCoordSpace = "client")
+        ShowMacroToggledTip("Playing macro (client-locked: " recorderTargetExe ") - F12 to stop")
+    else
+        ShowMacroToggledTip("Playing recorded macro (F12 to stop)")
     SetTimer, RecorderPlayNext, -1
 }
 
@@ -1044,6 +1097,7 @@ ClearRecorder()
     global recorderEvents, recorderStart, recorderLast, recorderHasControllerEvents, recorderSendMode
     global recorderKbMouseEnabled, recorderControllerEnabled, recorderControllerSuppress
     global recorderControllerSuppressUntil, recorderControllerPrevState
+    global recorderMouseCoordSpace, recorderTargetHwnd, recorderTargetExe, recorderTargetClientW, recorderTargetClientH
     global recorderPlayIndex, recorderPaused
     recorderEvents := []
     recorderStart := 0
@@ -1056,6 +1110,11 @@ ClearRecorder()
     recorderControllerSuppress := false
     recorderControllerSuppressUntil := 0
     recorderControllerPrevState := ""
+    recorderMouseCoordSpace := "screen"
+    recorderTargetHwnd := 0
+    recorderTargetExe := ""
+    recorderTargetClientW := 0
+    recorderTargetClientH := 0
     recorderPlayIndex := 1
     recorderPaused := false
     ShowMacroToggledTip("Macro Toggled Off")
@@ -1095,7 +1154,30 @@ RecorderPlayNext:
         }
         else if (evt.type = "mousemove")
         {
-            MouseMove, % evt.x, % evt.y, 0
+            ; Ensure screen coordinates for MouseMove regardless of global CoordMode
+            CoordMode, Mouse, Screen
+            if (recorderMouseCoordSpace = "client")
+            {
+                WinGet, activeExe, ProcessName, A
+                if (activeExe = "" || activeExe != recorderTargetExe)
+                {
+                    StopPlayback(true)
+                    ShowMacroToggledTip("Playback stopped (focus lost: " recorderTargetExe ")", 3000, false)
+                    return
+                }
+                hwnd := WinExist("A")
+                if (!hwnd || !Recorder_ClientToScreen(hwnd, evt.x, evt.y, sx, sy))
+                {
+                    StopPlayback(true)
+                    ShowMacroToggledTip("Playback stopped (client coords conversion failed)", 3000, false)
+                    return
+                }
+                MouseMove, %sx%, %sy%, 0
+            }
+            else
+            {
+                MouseMove, % evt.x, % evt.y, 0
+            }
         }
         else if (evt.type = "controller")
         {
@@ -1147,6 +1229,8 @@ RecorderSampleMouse:
     global recorderActive
     if (!recorderActive)
         return
+    ; Ensure screen coordinates for consistent recording
+    CoordMode, Mouse, Screen
     MouseGetPos, mx, my
     RecorderAddEvent("mousemove", "", "", mx, my)
 return
@@ -1195,6 +1279,7 @@ FinalizeRecording()
     global recorderActive, recorderEvents, recorderSuppressStopTip, recorderHasControllerEvents
     global recorderKbMouseEnabled, recorderControllerEnabled, recorderControllerSuppress
     global recorderControllerSuppressUntil, recorderControllerPrevState
+    global recorderMouseCoordSpace
     if (!recorderActive)
         return
     recorderActive := false
@@ -1212,15 +1297,64 @@ FinalizeRecording()
         recorderSuppressStopTip := false
         return
     }
-    ShowMacroToggledTip("Recording stopped - F12 toggles playback")
+
+    ; Count events by type for diagnostic feedback
+    mouseCount := 0
+    keyCount := 0
+    ctrlCount := 0
+    for idx, evt in recorderEvents
+    {
+        if (evt.type = "mousemove")
+            mouseCount++
+        else if (evt.type = "key" || evt.type = "mousebtn")
+            keyCount++
+        else if (evt.type = "controller")
+            ctrlCount++
+    }
+    totalCount := recorderEvents.MaxIndex()
+    if (totalCount = "")
+        totalCount := 0
+
+    ; Build informative message
+    if (totalCount = 0)
+        tipText := "Recording stopped - no events captured"
+    else
+    {
+        tipText := "Recorded " totalCount " events"
+        if (mouseCount > 0)
+            tipText .= " (mouse:" mouseCount ")"
+        if (keyCount > 0)
+            tipText .= " (keys:" keyCount ")"
+        if (ctrlCount > 0)
+            tipText .= " (ctrl:" ctrlCount ")"
+        tipText .= " - F12 plays"
+    }
+    ShowMacroToggledTip(tipText)
 }
 
 RecorderAddEvent(type, code := "", state := "", x := "", y := "", payload := "")
 {
     global recorderEvents, recorderLast, recorderActive
+    global recorderMouseCoordSpace, recorderTargetHwnd
     ; Guard: Ignore events if recording was stopped (hotkey context may not have refreshed yet)
     if (!recorderActive)
         return
+
+    ; For mousemove in client mode, validate bounds BEFORE updating timing
+    ; This prevents timing corruption when events are filtered out
+    if (type = "mousemove" && recorderMouseCoordSpace = "client")
+    {
+        if (!recorderTargetHwnd)
+            return
+        if (!Recorder_ScreenToClient(recorderTargetHwnd, x, y, cx, cy))
+            return
+        if (!Recorder_GetClientSize(recorderTargetHwnd, cw, ch))
+            return
+        if (cx < 0 || cy < 0 || cx >= cw || cy >= ch)
+            return
+    }
+
+    ; Now update timing (only for events that will actually be recorded)
     now := A_TickCount
     delay := now - recorderLast
     recorderLast := now
@@ -1234,14 +1368,57 @@ RecorderAddEvent(type, code := "", state := "", x := "", y := "", payload := "")
     }
     else if (type = "mousemove")
     {
-        recEvt.x := x
-        recEvt.y := y
+        if (recorderMouseCoordSpace = "client")
+        {
+            ; cx, cy already computed above
+            recEvt.x := cx
+            recEvt.y := cy
+        }
+        else
+        {
+            recEvt.x := x
+            recEvt.y := y
+        }
     }
     else if (type = "controller")
     {
         recEvt.state := payload
     }
     recorderEvents.Push(recEvt)
+}
+
+Recorder_GetClientSize(hwnd, ByRef w, ByRef h)
+{
+    VarSetCapacity(rect, 16, 0)
+    if (!DllCall("GetClientRect", "ptr", hwnd, "ptr", &rect))
+        return false
+    w := NumGet(rect, 8, "Int")
+    h := NumGet(rect, 12, "Int")
+    return true
+}
+
+Recorder_ScreenToClient(hwnd, sx, sy, ByRef cx, ByRef cy)
+{
+    VarSetCapacity(pt, 8, 0)
+    NumPut(sx, pt, 0, "Int")
+    NumPut(sy, pt, 4, "Int")
+    if (!DllCall("ScreenToClient", "ptr", hwnd, "ptr", &pt))
+        return false
+    cx := NumGet(pt, 0, "Int")
+    cy := NumGet(pt, 4, "Int")
+    return true
+}
+
+Recorder_ClientToScreen(hwnd, cx, cy, ByRef sx, ByRef sy)
+{
+    VarSetCapacity(pt, 8, 0)
+    NumPut(cx, pt, 0, "Int")
+    NumPut(cy, pt, 4, "Int")
+    if (!DllCall("ClientToScreen", "ptr", hwnd, "ptr", &pt))
+        return false
+    sx := NumGet(pt, 0, "Int")
+    sy := NumGet(pt, 4, "Int")
+    return true
 }
 
 StartPureHoldSetup()
