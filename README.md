@@ -13,8 +13,8 @@ Add a shortcut to `Macros.ahk` in your Startup folder (`Win+R` → `Shell:Startu
 ## Essential Hotkeys
 
 - `Ctrl+Shift+Alt+Z` — open the macro menu overlay; use `Esc` to cancel/timeout.
-- While menu is open: `F1` stage `/` => left-click toggle; `F2` stage autoclicker; `F3` stage turbo key hold; `F4` stage pure key hold; `F5` start recording.
-- To toggle off F1-F5 functions - `Esc` or corresponding FKey.
+- While menu is open: `F1` stage `/` => left-click toggle; `F2` stage autoclicker; `F3` stage turbo key hold; `F4` stage pure key hold; `F5` start recording (screen coords); `F6` start recording (client-locked mouse).
+- To toggle off F1-F6 functions - `Esc` or corresponding FKey (recording stops with `F5`).
 - `Ctrl+Alt+P` — toggle SendMode (Input/Play) used by the macros. Useful as a switch to SendPlay if a game doesn't allow SendInput.
 - `Ctrl+Esc` — reload the script.
 
@@ -30,6 +30,7 @@ All controller functions require the L1+L2+R1+R2 combo to prevent accidental in-
 ## Macro Recording (F5)
 
 - `F5` toggles start/end macro recording
+- From the menu: `F6` starts recording with client-locked mouse movement relative to the active window (focus the same app for playback)
 - `F12` toggles playback after recording
 - If using controller: combos above control recording/playback
 - Tooltip will warn if controller support is unavailable (vJoy/XInput missing)
