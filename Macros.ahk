@@ -45,6 +45,11 @@ recorderActive := false
 recorderPlaying := false
 recorderPaused := false
 recorderPlayIndex := 1
+recorderLoopTarget := -1
+recorderLoopCurrent := 1
+playbackLoopPromptActive := false
+playbackLoopPromptDeadline := 0
+playbackLoopPromptTitleBase := "Playback Loops"
 recorderSuppressStopTip := false
 recorderEvents := []
 recorderStart := 0
@@ -203,7 +208,7 @@ ToggleRecorderPlayback()
     if (recorderPlaying)
         StopPlayback()
     else
-        StartPlayback()
+        StartPlayback("prompt")
 }
 
 MenuTimeout:
@@ -215,7 +220,7 @@ AutoStartControllerPlayback:
     global recorderEvents, recorderPlaying, recorderMouseCoordSpace, recorderTargetExe
     if (recorderEvents.MaxIndex() != "" && !recorderPlaying)
     {
-        StartPlayback()
+        StartPlayback(-1)
         if (recorderMouseCoordSpace = "client")
             ShowMacroToggledTip("Auto-started playback (client-locked: " recorderTargetExe ") - combo+A stop, X clear", 3000, true)
         else
@@ -360,7 +365,7 @@ return
 
 ControllerInputBoxHelper:
     ; Check if one of our script's InputBox dialogs is active
-    ; Only match dialogs with titles we use (Turbo Hold, Pure Key Hold, Autoclicker)
+    ; Only match dialogs with titles we use (Turbo Hold, Pure Key Hold, Autoclicker, Playback Loops)
     global XINPUT_GAMEPAD_A, controllerInputBoxALatched
     dialogHwnd := 0
     if (WinExist("Turbo Hold ahk_class #32770"))
@@ -368,6 +373,8 @@ ControllerInputBoxHelper:
     else if (WinExist("Pure Key Hold ahk_class #32770"))
         dialogHwnd := WinExist()
     else if (WinExist("Autoclicker ahk_class #32770"))
+        dialogHwnd := WinExist()
+    else if (WinExist("Playback Loops ahk_class #32770"))
         dialogHwnd := WinExist()
 
     if (dialogHwnd)
@@ -483,7 +490,7 @@ ShowHotkeyHelp()
         . "`n"
         . "Recording/Playback:`n"
         . "F5 - Start/stop recording`n"
-        . "F12 - Toggle playback (when not using F1/F2)`n"
+        . "F12 - Toggle playback (prompts loops; blank/Enter/15s timeout = infinite)`n"
         . "Esc - Cancel/stop current mode`n"
     if (ctrlSupport)
     {
@@ -1036,11 +1043,12 @@ StopRecorder(silent := false)
         ShowMacroToggledTip("Macro Toggled Off")
 }
 
-StartPlayback()
+StartPlayback(loopMode := "prompt")
 {
     global recorderEvents, recorderPlaying, recorderHasControllerEvents
-    global recorderPaused, recorderPlayIndex
+    global recorderPaused, recorderPlayIndex, recorderLoopTarget, recorderLoopCurrent
     global recorderMouseCoordSpace, recorderTargetExe
+    loopTarget := -1
     if (recorderPlaying)
         return
     if (recorderEvents.MaxIndex() = "")
@@ -1062,20 +1070,105 @@ StartPlayback()
             return
         }
     }
+    if (!ResolvePlaybackLoopTarget(loopMode, loopTarget))
+        return
     recorderPlaying := true
     recorderPaused := false
     recorderPlayIndex := 1
+    recorderLoopTarget := loopTarget
+    recorderLoopCurrent := 1
+    loopLabel := (recorderLoopTarget > 0) ? (recorderLoopTarget " loops") : "infinite loops"
     if (recorderMouseCoordSpace = "client")
-        ShowMacroToggledTip("Playing macro (client-locked: " recorderTargetExe ") - F12 to stop")
+        ShowMacroToggledTip("Playing macro (client-locked: " recorderTargetExe ", " loopLabel ") - F12 to stop")
     else
-        ShowMacroToggledTip("Playing recorded macro (F12 to stop)")
+        ShowMacroToggledTip("Playing recorded macro (" loopLabel ", F12 to stop)")
     SetTimer, RecorderPlayNext, -1
 }
+
+ResolvePlaybackLoopTarget(loopMode, ByRef loopTarget)
+{
+    loopTarget := -1
+    if (loopMode = "prompt")
+    {
+        promptText := "Enter playback loop count.`n"
+            . "Positive integer = finite loops`n"
+            . "Press Enter on blank = infinite`n"
+            . "15s timeout = infinite`n"
+            . "Esc/Cancel = abort"
+        promptTimeoutSec := 15
+        StartPlaybackLoopPromptCountdown(promptTimeoutSec)
+        InputBox, loopInput, % playbackLoopPromptTitleBase " (" promptTimeoutSec "s)", %promptText%, , 420, 220, , , , %promptTimeoutSec%
+        StopPlaybackLoopPromptCountdown()
+        if (ErrorLevel = 1)
+        {
+            ShowMacroToggledTip("Playback canceled", 1200, false)
+            return false
+        }
+        if (ErrorLevel = 2)
+        {
+            loopTarget := -1
+            return true
+        }
+        loopInput := Trim(loopInput)
+        if (loopInput = "")
+        {
+            loopTarget := -1
+            return true
+        }
+        if loopInput is integer
+        {
+            loopTarget := loopInput + 0
+            if (loopTarget > 0)
+                return true
+        }
+        ShowMacroToggledTip("Invalid loops (use positive integer)", 2000, false)
+        return false
+    }
+    if loopMode is integer
+    {
+        loopTarget := loopMode + 0
+        if (loopTarget <= 0)
+            loopTarget := -1
+    }
+    return true
+}
+
+StartPlaybackLoopPromptCountdown(timeoutSec)
+{
+    global playbackLoopPromptActive, playbackLoopPromptDeadline
+    if (timeoutSec <= 0)
+        timeoutSec := 15
+    playbackLoopPromptActive := true
+    playbackLoopPromptDeadline := A_TickCount + (timeoutSec * 1000)
+    SetTimer, PlaybackLoopPromptCountdownTick, 200
+}
+
+StopPlaybackLoopPromptCountdown()
+{
+    global playbackLoopPromptActive, playbackLoopPromptDeadline
+    playbackLoopPromptActive := false
+    playbackLoopPromptDeadline := 0
+    SetTimer, PlaybackLoopPromptCountdownTick, Off
+}
+
+PlaybackLoopPromptCountdownTick:
+    global playbackLoopPromptActive, playbackLoopPromptDeadline, playbackLoopPromptTitleBase
+    if (!playbackLoopPromptActive)
+        return
+    promptHwnd := WinExist(playbackLoopPromptTitleBase " ahk_class #32770")
+    if (!promptHwnd)
+        return
+    remainingMs := playbackLoopPromptDeadline - A_TickCount
+    if (remainingMs < 0)
+        remainingMs := 0
+    remainingSec := Ceil(remainingMs / 1000)
+    WinSetTitle, ahk_id %promptHwnd%,, % playbackLoopPromptTitleBase " (" remainingSec "s)"
+return
 
 StopPlayback(silent := false)
 {
     global recorderPlaying, recorderHasControllerEvents
-    global recorderPaused, recorderPlayIndex
+    global recorderPaused, recorderPlayIndex, recorderLoopTarget, recorderLoopCurrent
     if (!recorderPlaying)
         return
     ; Set flag first to signal any running loop to exit
@@ -1084,6 +1177,8 @@ StopPlayback(silent := false)
     ; Disable timer before resetting index to prevent race condition
     SetTimer, RecorderPlayNext, Off
     recorderPlayIndex := 1
+    recorderLoopTarget := -1
+    recorderLoopCurrent := 1
     if (recorderHasControllerEvents)
         ControllerResetVJoyState()
     if (!silent)
@@ -1114,7 +1209,7 @@ ClearRecorder()
     global recorderKbMouseEnabled, recorderControllerEnabled, recorderControllerSuppress
     global recorderControllerSuppressUntil, recorderControllerPrevState
     global recorderMouseCoordSpace, recorderTargetHwnd, recorderTargetExe, recorderTargetClientW, recorderTargetClientH
-    global recorderPlayIndex, recorderPaused
+    global recorderPlayIndex, recorderPaused, recorderLoopTarget, recorderLoopCurrent
     recorderEvents := []
     recorderStart := 0
     recorderLast := 0
@@ -1133,11 +1228,14 @@ ClearRecorder()
     recorderTargetClientH := 0
     recorderPlayIndex := 1
     recorderPaused := false
+    recorderLoopTarget := -1
+    recorderLoopCurrent := 1
     ShowMacroToggledTip("Macro Toggled Off")
 }
 
 RecorderPlayNext:
     global recorderEvents, recorderPlaying, recorderPaused, recorderPlayIndex
+    global recorderLoopTarget, recorderLoopCurrent
     if (!recorderPlaying)
         return
     maxIndex := recorderEvents.MaxIndex()
@@ -1204,6 +1302,15 @@ RecorderPlayNext:
     ; Only reset index and reschedule if still playing (state may have changed during Sleep)
     if (recorderPlaying)
     {
+        if (recorderLoopTarget > 0 && recorderLoopCurrent >= recorderLoopTarget)
+        {
+            completedLoops := recorderLoopCurrent
+            StopPlayback(true)
+            ShowMacroToggledTip("Playback complete (" completedLoops " loops)", 2000, false)
+            return
+        }
+        if (recorderLoopTarget > 0)
+            recorderLoopCurrent++
         recorderPlayIndex := 1
         SetTimer, RecorderPlayNext, -1
     }
