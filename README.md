@@ -22,7 +22,7 @@ Add a shortcut to `Macros.ahk` in your Startup folder (`Win+R` → `Shell:Startu
 
 All controller functions require the L1+L2+R1+R2 combo to prevent accidental in-game triggers:
 
-- `L1+L2+R1+R2+A` — start recording; press again to stop and auto-start looping playback; press again to stop playback
+- `L1+L2+R1+R2+A` — start recording; press again to stop and auto-start infinite playback; press again to stop playback
 - `L1+L2+R1+R2+B` — start turbo key hold
 - `L1+L2+R1+R2+Y` — start pure key hold
 - `L1+L2+R1+R2+X` — kill switch (stop and clear all macros)
@@ -31,7 +31,7 @@ All controller functions require the L1+L2+R1+R2 combo to prevent accidental in-
 
 - `F5` toggles start/end macro recording
 - From the menu: `F6` starts recording with client-locked mouse movement relative to the active window (focus the same app for playback)
-- `F12` toggles playback after recording
+- `F12` prompts for playback loops after recording (blank/Enter or 15s timeout = infinite, Esc cancels)
 - If using controller: combos above control recording/playback
 - Tooltip will warn if controller support is unavailable (vJoy/XInput missing)
 
