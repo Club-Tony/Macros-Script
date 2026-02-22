@@ -1,3 +1,4 @@
+#Requires AutoHotkey v1
 ; Debug.ahk - Debug tooltip utilities for Macros.ahk
 ; Include this library and set DEBUG_ENABLED := true to enable debug tooltips
 ;

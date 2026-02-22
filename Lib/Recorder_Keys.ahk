@@ -1,3 +1,4 @@
+#Requires AutoHotkey v1
 #If (recorderActive && recorderKbMouseEnabled)
 ~*LButton::
     RecorderAddEvent("mousebtn", "LButton", "Down")
