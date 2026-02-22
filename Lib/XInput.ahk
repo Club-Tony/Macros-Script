@@ -1,3 +1,4 @@
+#Requires AutoHotkey v1
 /*  XInput by Lexikos
  *  This version of the script uses objects, so requires AutoHotkey_L.
  */

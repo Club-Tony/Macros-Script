@@ -1,3 +1,4 @@
+#Requires AutoHotkey v1
 ; VJoy_lib.ahk
 ; Original code by Axlar - http://www.autohotkey.com/board/topic/87690-
 ; modded by evilC:
