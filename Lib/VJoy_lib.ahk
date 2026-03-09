@@ -87,25 +87,6 @@ VJoy_LoadLibrary() {
     return hVJDLL
 }
  
-GetFileVersion(pszFilePath) {
-    dwSize := DLLCall("Version\GetFileVersionInfoSize", "Str", pszFilePath)
-    if (!dwSize) {
-        return
-    }
-    VarSetCapacity(pvData, dwSize)
-    if (!DLLCall("Version\GetFileVersionInfo", "Str", pszFilePath
-        , "Int", 0, "Int", dwSize, "Ptr", &pvData)) {
-        return
-    }
-    ; Get British product version string
-    if (!DLLCall("Version\VerQueryValue", "UInt", &pvData, "Str"
-        , "\\StringFileInfo\\040904b0\\ProductVersion", "UIntP"
-        , lpTranslate, "UInt", 0)) {
-        return
-    }
-    return StrGet(lpTranslate)
-}
- 
 Class VJoyDev {
     __New(dev_id) {
  
@@ -214,8 +195,7 @@ Class VJoyDev {
         }
  
         if (DeviceStatus = VJD_STAT_OWN) {
-            MsgBox % "Failed to acquire vJoy device number: " dev_id "`n(Other process owned device)"
-            return
+            ; Device already owned by this process — no need to re-acquire
         } else if (DeviceStatus = VJD_STAT_FREE and !ac_jvd ) {
             MsgBox % "Failed to acquire vJoy device number: " dev_id "`nAcquired: " ac_jvd
             return
@@ -300,7 +280,7 @@ Class VJoyDev {
     }
     SetAxis_SL0(axis_val) {
         Global HID_USAGE_SL0
-		new_val := parse_rel_val(axis_val, this.Axis_SL0, this.AxisMax_SL0)
+		new_val := parse_rel_val(axis_val, this.Slider0, this.Slider0_Max)
         res := this.SetAxis(new_val, HID_USAGE_SL0)
         if (res) {
             this.Slider0 := new_val
@@ -309,7 +289,7 @@ Class VJoyDev {
     }
     SetAxis_SL1(axis_val) {
         Global HID_USAGE_SL1
-		new_val := parse_rel_val(axis_val, this.Axis_SL1, this.AxisMax_SL1)
+		new_val := parse_rel_val(axis_val, this.Slider1, this.Slider1_Max)
         res := this.SetAxis(new_val, HID_USAGE_SL1)
         if (res) {
             this.Slider1 := new_val
@@ -448,7 +428,7 @@ VJoy_Close() {
     for idx, dev in VJDev
         dev.delete
     if (hVJDLL) {
-        DLLCall("FreeLibraly", "Ptr", hVJDLL)
+        DLLCall("FreeLibrary", "Ptr", hVJDLL)
         hVJDLL:=
     }
 }
@@ -586,8 +566,8 @@ VJoy_GetVJDAxisMax(id, usage) {
             (usage = HID_USAGE_RX) ? VJDev[id].AxisMax_RX :
             (usage = HID_USAGE_RY) ? VJDev[id].AxisMax_RY :
             (usage = HID_USAGE_RZ) ? VJDev[id].AxisMax_RZ :
-            (usage = HID_USAGE_SL0) ?   VJDev[id].AxisMax_Y :
-                                        VJDev[id].AxisMax_SL1
+            (usage = HID_USAGE_SL0) ?   VJDev[id].Slider0_Max :
+                                        VJDev[id].Slider1_Max
 }
  
 VJoy_GetVJDAxisExist(id, usage) {
@@ -602,7 +582,7 @@ VJoy_GetVJDAxisExist(id, usage) {
             (usage = HID_USAGE_RX) ? VJDev[id].AxisExist_RX :
             (usage = HID_USAGE_RY) ? VJDev[id].AxisExist_RY :
             (usage = HID_USAGE_RZ) ? VJDev[id].AxisExist_RZ :
-            (usage = HID_USAGE_SL0) ?   VJDev[id].AxisExist_Y :
+            (usage = HID_USAGE_SL0) ?   VJDev[id].AxisExist_SL0 :
                                         VJDev[id].AxisExist_SL1
 }
  
@@ -781,79 +761,6 @@ VJoy_SetContPov(Value, id, nPov) {
     return VJDev[id].SetContPov(Value, nPov)
 }
  
-; for debug: dump value of structure
-VJoy_Dump(id) {
-    Global VJDev
-    if (VJoy_DeviceErr(id))
-        return False
- 
-    num := VJoy_GetVJDButtonNumber(id)
-    for idx, btn in VJDev[id].Btn
-    {
-        if (idx<10)
-            buf1 .= "_"
-        buf1 .= idx . "|"
-        buf2 .= "_" . btn . "|"
-    }
-    str_btn = Button(%num%):`n  %buf1%`n  %buf2%`n
- 
-    if (VJoy_GetAxisMax_X(id)) {
-        str_btn .= "Axis_X: " . VJoy_GetAxis_X(id) . "`n"
-    }
-    if (VJoy_GetAxisMax_Y(id)) {
-        str_btn .= "Axis_Y: " . VJoy_GetAxis_Y(id) . "`n"
-    }
-    if (VJoy_GetAxisMax_Z(id)) {
-        str_btn .= "Axis_Z: " . VJoy_GetAxis_Z(id) . "`n"
-    }
-    if (VJoy_GetAxisMax_RX(id)) {
-        str_btn .= "Axis_RX: " . VJoy_GetAxis_RX(id) . "`n"
-    }
-    if (VJoy_GetAxisMax_RY(id)) {
-        str_btn .= "Axis_RY: " . VJoy_GetAxis_RY(id) . "`n"
-    }
-    if (VJoy_GetAxisMax_RZ(id)) {
-        str_btn .= "Axis_RZ: " . VJoy_GetAxis_RZ(id) . "`n"
-    }
-    if (VJoy_GetAxisMax_SL0(id)) {
-        str_btn .= "Axis_SL0: " . VJoy_GetAxis_SL0(id) . "`n"
-    }
-    if (VJoy_GetAxisMax_SL1(id)) {
-        str_btn .= "Axis_SL1: " . VJoy_GetAxis_SL1(id) . "`n"
-    }
- 
-    num := VJoy_GetContPovNumber(id)
-    if (num) {
-        for idx, btn in VJDev[id].ContPov
-        {
-            Loop, % (StrLen(btn) - 1)
-                buf3 .= "_"
-            buf3 .= idx . "|"
-            buf4 .= btn . "|"
-        }
-        str_cont = ContPov(%num%):`n  %buf3%`n  %buf4%`n
-    } else {
-        str_cont = No Continuous Button.`n
-    }
-    str_btn .= str_cont
- 
-    num := VJoy_GetDiscPovNumber(id)
-    if (num) {
-        for idx, btn in VJDev[id].DiscPov
-        {
-            Loop, % (StrLen(btn) - 1)
-                buf5 .= "_"
-            buf5 .= idx . "|"
-            buf6 .= btn . "|"
-        }
-        str_Disc = DiscPov(%num%):`n  %buf5%`n  %buf6%`n
-    } else {
-        str_Disc = No Discrete Button.`n
-    }
-    str_btn .= str_Disc
-    ToolTip, %str_btn%
-}
- 
 parse_rel_val(invar, curval, max) {
     if (InStr(invar, "+")) {
         StringReplace, _buffer, invar, +
@@ -909,26 +816,26 @@ RegRead64(sRootKey, sKeyName, sValueName = "", DataMaxSize=1024) {
     }
     RegAccessRight := KEY_QUERY_VALUE + KEY_WOW64_64KEY
     ;VarSetCapacity(sValueType, 4)
-    DllCall("Advapi32.dll\RegOpenKeyEx" ENC, "uint", myhKey, "str", sKeyName, "uint", 0, "uint", RegAccessRight, "uint*", hKey)    ; open key
-    DllCall("Advapi32.dll\RegQueryValueEx" ENC, "uint", hKey, "str", sValueName, "uint", 0, "uint*", sValueType, "uint", 0, "uint", 0)     ; get value type
+    DllCall("Advapi32.dll\RegOpenKeyEx" ENC, "ptr", myhKey, "str", sKeyName, "uint", 0, "uint", RegAccessRight, "ptr*", hKey)    ; open key
+    DllCall("Advapi32.dll\RegQueryValueEx" ENC, "ptr", hKey, "str", sValueName, "uint", 0, "uint*", sValueType, "uint", 0, "uint", 0)     ; get value type
     If (sValueType == REG_SZ or sValueType == REG_EXPAND_SZ) {
         VarSetCapacity(sValue, vValueSize:=DataMaxSize)
-        DllCall("Advapi32.dll\RegQueryValueEx" ENC, "uint", hKey, "str", sValueName, "uint", 0, "uint", 0, "str", sValue, "uint*", vValueSize) ; get string or string-exp
+        DllCall("Advapi32.dll\RegQueryValueEx" ENC, "ptr", hKey, "str", sValueName, "uint", 0, "uint", 0, "str", sValue, "uint*", vValueSize) ; get string or string-exp
     } Else If (sValueType == REG_DWORD) {
         VarSetCapacity(sValue, vValueSize:=4)
-        DllCall("Advapi32.dll\RegQueryValueEx" ENC, "uint", hKey, "str", sValueName, "uint", 0, "uint", 0, "uint*", sValue, "uint*", vValueSize)   ; get dword
+        DllCall("Advapi32.dll\RegQueryValueEx" ENC, "ptr", hKey, "str", sValueName, "uint", 0, "uint", 0, "uint*", sValue, "uint*", vValueSize)   ; get dword
     } Else If (sValueType == REG_MULTI_SZ) {
         VarSetCapacity(sTmp, vValueSize:=DataMaxSize)
-        DllCall("Advapi32.dll\RegQueryValueEx" ENC, "uint", hKey, "str", sValueName, "uint", 0, "uint", 0, "str", sTmp, "uint*", vValueSize)   ; get string-mult
+        DllCall("Advapi32.dll\RegQueryValueEx" ENC, "ptr", hKey, "str", sValueName, "uint", 0, "uint", 0, "str", sTmp, "uint*", vValueSize)   ; get string-mult
         sValue := ExtractData(&sTmp) "`n"
         Loop {
             If (errorLevel+2 >= &sTmp + vValueSize)
                 Break
-            sValue := sValue ExtractData( errorLevel+1 ) "`n" 
+            sValue := sValue ExtractData( errorLevel+1 ) "`n"
         }
     } Else If (sValueType == REG_BINARY) {
         VarSetCapacity(sTmp, vValueSize:=DataMaxSize)
-        DllCall("Advapi32.dll\RegQueryValueEx" ENC, "uint", hKey, "str", sValueName, "uint", 0, "uint", 0, "str", sTmp, "uint*", vValueSize)   ; get binary
+        DllCall("Advapi32.dll\RegQueryValueEx" ENC, "ptr", hKey, "str", sValueName, "uint", 0, "uint", 0, "str", sTmp, "uint*", vValueSize)   ; get binary
         sValue := ""
         SetFormat, integer, h
         Loop %vValueSize% {
@@ -938,11 +845,11 @@ RegRead64(sRootKey, sKeyName, sValueName = "", DataMaxSize=1024) {
         }
         SetFormat, integer, d
     } Else {                ; value does not exist or unsupported value type
-        DllCall("Advapi32.dll\RegCloseKey", "uint", hKey)
+        DllCall("Advapi32.dll\RegCloseKey", "ptr", hKey)
         ErrorLevel := 1
         return ""
     }
-    DllCall("Advapi32.dll\RegCloseKey", "uint", hKey)
+    DllCall("Advapi32.dll\RegCloseKey", "ptr", hKey)
     return sValue
 }
  

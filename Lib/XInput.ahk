@@ -167,7 +167,7 @@ XInput_Init(dll="xinput1_3.dll", silent := false)
     
     ;=============== END CONSTANTS =================
     
-    _XInput_hm := DllCall("LoadLibrary" ,"str", dll)
+    _XInput_hm := DllCall("LoadLibrary", "str", dll, "ptr")
     
     if !_XInput_hm {
         if (!silent)
@@ -175,16 +175,16 @@ XInput_Init(dll="xinput1_3.dll", silent := false)
         return false
     }
 
-    _XInput_GetState        := DllCall("GetProcAddress", "uint", _XInput_hm, "uint", 100) ; guide/home button works with this. __stdcall int secret_get_gamepad (int, XINPUT_GAMEPAD_SECRET*)
+    _XInput_GetState        := DllCall("GetProcAddress", "ptr", _XInput_hm, "uint", 100) ; guide/home button works with this. __stdcall int secret_get_gamepad (int, XINPUT_GAMEPAD_SECRET*)
     if (!_XInput_GetState)
-        _XInput_GetState    := DllCall("GetProcAddress", "uint", _XInput_hm, "AStr", "XInputGetState")
-    _XInput_SetState        := DllCall("GetProcAddress", "uint", _XInput_hm, "AStr", "XInputSetState")
-    _XInput_GetKeystroke    := DllCall("GetProcAddress", "uint", _XInput_hm, "AStr", "XInputGetKeystroke")  
-    _XInput_GetCapabilities := DllCall("GetProcAddress", "uint", _XInput_hm, "AStr", "XInputGetCapabilities")
-    _XInput_GetBatteryInformation := DllCall("GetProcAddress", "uint", _XInput_hm, "AStr", "XInputGetBatteryInformation")
+        _XInput_GetState    := DllCall("GetProcAddress", "ptr", _XInput_hm, "AStr", "XInputGetState")
+    _XInput_SetState        := DllCall("GetProcAddress", "ptr", _XInput_hm, "AStr", "XInputSetState")
+    _XInput_GetKeystroke    := DllCall("GetProcAddress", "ptr", _XInput_hm, "AStr", "XInputGetKeystroke")
+    _XInput_GetCapabilities := DllCall("GetProcAddress", "ptr", _XInput_hm, "AStr", "XInputGetCapabilities")
+    _XInput_GetBatteryInformation := DllCall("GetProcAddress", "ptr", _XInput_hm, "AStr", "XInputGetBatteryInformation")
     
     ;OnExit, XInput_Term__
-    if !(_XInput_GetState && _XInput_SetState && _XInput_GetCapabilities && _XInput_GetBatteryInformation) {
+    if !(_XInput_GetState && _XInput_SetState && _XInput_GetKeystroke && _XInput_GetCapabilities && _XInput_GetBatteryInformation) {
         XInput_Term()
         if (!silent)
             MsgBox, Failed to initialize XInput: function not found.
@@ -201,7 +201,7 @@ XInput_Term() {
     ;XInput_Term__:
     global
     if _XInput_hm {
-        DllCall("FreeLibrary", "uint", _XInput_hm)
+        DllCall("FreeLibrary", "ptr", _XInput_hm)
         _XInput_hm := 0
         _XInput_GetState := 0
         _XInput_SetState := 0
@@ -242,7 +242,7 @@ XInput_GetState(UserIndex = 0)
 {
     global _XInput_GetState
     VarSetCapacity(xiState, 16)
-    if ErrorLevel := DllCall(_XInput_GetState, "uint", UserIndex , "uint", &xiState)
+    if ErrorLevel := DllCall(_XInput_GetState, "uint", UserIndex , "ptr", &xiState)
         return 0
     
     return {
@@ -290,7 +290,7 @@ XInput_GetKeystroke(UserIndex = 0x0FF) ; XUSER_INDEX_ANY = 0x0FF
     if (!_XInput_GetKeystroke)
         return 0
     VarSetCapacity(xiKeystroke, 8)
-    if ErrorLevel := DllCall(_XInput_GetKeystroke, "uint", UserIndex, "uint", 0, "uint", &xiKeystroke)
+    if ErrorLevel := DllCall(_XInput_GetKeystroke, "uint", UserIndex, "uint", 0, "ptr", &xiKeystroke)
         return 0
     
     ;Unicode : NumGet(xiKeystroke, 2, "UShort")
@@ -366,13 +366,13 @@ XInput_GetCapabilities(UserIndex = 0, Flags = 0)
 {
     global _XInput_GetCapabilities
     VarSetCapacity(xiCaps, 20)
-    if ErrorLevel := DllCall(_XInput_GetCapabilities, "uint", UserIndex, "uint", Flags, "uint", &xiCaps)
+    if ErrorLevel := DllCall(_XInput_GetCapabilities, "uint", UserIndex, "uint", Flags, "ptr", &xiCaps)
         return 0
     
     return {
         (Join,
             UserIndex : UserIndex
-            Type : NumGet(xiCaps, 0 "UChar")
+            Type : NumGet(xiCaps, 0, "UChar")
             SubType : NumGet(xiCaps, 1, "UChar")
             Flags : NumGet(xiCaps, 2, "UShort")
             Buttons : NumGet(xiCaps, 4, "UShort")
@@ -388,7 +388,7 @@ XInput_GetCapabilities(UserIndex = 0, Flags = 0)
 }
 
 /*
-*   Retrieves the capabilities and features of a connected controller.
+*   Retrieves the battery information for a connected controller.
 *
 *   Parameters:
 *       UserIndex  -   [in] Index of the user's controller. Can be a value in the range 0-3.
@@ -405,11 +405,7 @@ XInput_GetCapabilities(UserIndex = 0, Flags = 0)
 *           BatteryLevel   ; The charge state of the battery. This value is only valid for wireless devices with a known battery type.
 *       }
 *
-    Function: XInput_GetCapabilities
-    
-    Retrieves the capabilities and features of a connected controller.
-        
-    Returns:
+*   Remarks:
 *       If the function succeeds, ErrorLevel will be set to ERROR_SUCCESS (0).
 *       If the controller is not connected, ErrorLevel will be set to ERROR_DEVICE_NOT_CONNECTED (1167).
 *       Otherwise ErrorLevel is set to the error code defined in Winerror.h.
@@ -418,7 +414,7 @@ XInput_GetBatteryInformation(UserIndex = 0, DevType = 1)
 {
     global _XInput_GetBatteryInformation
     VarSetCapacity(xiBattery, 8) ; actually 7 but 8 may have better performance
-    if ErrorLevel := DllCall(_XInput_GetBatteryInformation, "uint", UserIndex, "uchar", DevType, "uint", &xiBattery)
+    if ErrorLevel := DllCall(_XInput_GetBatteryInformation, "uint", UserIndex, "uchar", DevType, "ptr", &xiBattery)
         return 0
     
     return {

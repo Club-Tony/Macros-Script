@@ -1264,7 +1264,10 @@ RecorderPlayNext:
         }
         else if (evt.type = "mousebtn")
         {
-            SendEventOrInput("{" evt.code " " evt.state "}")
+            if (evt.state != "")
+                SendEventOrInput("{" evt.code " " evt.state "}")
+            else
+                SendEventOrInput("{" evt.code "}")
         }
         else if (evt.type = "mousemove")
         {
@@ -1311,6 +1314,8 @@ RecorderPlayNext:
         }
         if (recorderLoopTarget > 0)
             recorderLoopCurrent++
+        else if (recorderLoopTarget = -1)
+            recorderLoopCurrent++
         recorderPlayIndex := 1
         SetTimer, RecorderPlayNext, -1
     }
@@ -1329,7 +1334,12 @@ SendEventOrInput(seq, state := "")
 
 ToggleSendMode()
 {
-    global sendMode, menuActive
+    global sendMode, menuActive, holdMacroOn, holdHoldOn
+    if (holdMacroOn || holdHoldOn)
+    {
+        ShowMacroToggledTip("Cannot change SendMode while hold is active", 2000)
+        return
+    }
     if (sendMode = "Input")
         sendMode := "Play"
     else
@@ -1817,33 +1827,6 @@ IsControllerCancelComboPressed(state)
         && (state.RightTrigger >= controllerComboTriggerThreshold))
 }
 
-IsControllerBackPressed(state)
-{
-    global XINPUT_GAMEPAD_BACK, XINPUT_KEYSTROKE_KEYDOWN, VK_PAD_BACK
-    if (IsObject(state) && (state.Buttons & XINPUT_GAMEPAD_BACK))
-        return true
-    if (EnsureXInputReady())
-    {
-        keystroke := XInput_GetKeystroke()
-        if (keystroke && (keystroke.VirtualKey = VK_PAD_BACK)
-            && (keystroke.Flags & XINPUT_KEYSTROKE_KEYDOWN))
-            return true
-    }
-    return false
-}
-
-; L1+L2+R1+R2+Start combo for playback toggle/pause
-IsControllerStartComboPressed(state)
-{
-    global XINPUT_GAMEPAD_LEFT_SHOULDER, XINPUT_GAMEPAD_RIGHT_SHOULDER
-    global XINPUT_GAMEPAD_START, controllerComboTriggerThreshold
-    return ((state.Buttons & XINPUT_GAMEPAD_LEFT_SHOULDER)
-        && (state.Buttons & XINPUT_GAMEPAD_RIGHT_SHOULDER)
-        && (state.Buttons & XINPUT_GAMEPAD_START)
-        && (state.LeftTrigger >= controllerComboTriggerThreshold)
-        && (state.RightTrigger >= controllerComboTriggerThreshold))
-}
-
 ; L1+L2+R1+R2+Back combo for cancel recording
 IsControllerBackComboPressed(state)
 {
@@ -2080,6 +2063,8 @@ ControllerApplyPov(buttons, mode)
     }
     else
     {
+        ; Discrete POV supports only 4 cardinal directions.
+        ; Diagonal D-pad input maps to the first match in priority order: up > right > down > left.
         dir := -1
         if (up)
             dir := 0

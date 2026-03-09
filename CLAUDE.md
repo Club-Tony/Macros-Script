@@ -49,7 +49,7 @@ AutoHotkey v1 macro automation script providing fast clicking, key holds, autocl
 
 - AutoHotkey v1 syntax (`#Requires AutoHotkey v1`)
 - Uses `#Include <LibName>` for library imports from `Lib/` folder
-- Debug tooltips are currently enabled throughout - look for `ToolTip, DEBUG:` lines
+- Debug system (`Lib/Debug.ahk`) is available but currently disabled -- the `#Include` is commented out in Macros.ahk
 - Controller recording uses normalization with configurable deadzones (`controllerThumbDeadzone`, `controllerTriggerDeadzone`)
 
 ## When Adding/Modifying Hotkeys
