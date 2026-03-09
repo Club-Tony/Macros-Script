@@ -1,4 +1,4 @@
-# AGENTS.md
+# CODEX.md
 
 AutoHotkey v1 macro automation script with autoclicker, key holds, and recording/playback with controller support.
 
