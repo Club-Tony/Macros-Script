@@ -24,7 +24,7 @@ PROBLEMS IDENTIFIED:
 FIXES IMPLEMENTED:
 ------------------
 
-### 1. COMBO SUPPRESSION SYSTEM (Lines 48-49, 689-701)
+### 1. COMBO SUPPRESSION SYSTEM
 
 Added two new global variables:
 - `recorderControllerSuppress` - Flag to suppress controller input
@@ -36,7 +36,7 @@ When you press L1+L2+R1+R2+A to start recording:
 - Allows you time to release all buttons before recording starts
 - Debug tooltips show suppression status and countdown
 
-### 2. IMPROVED StartRecorder() FUNCTION (Lines 669-733)
+### 2. IMPROVED StartRecorder() FUNCTION
 
 Added `suppressCombo` parameter (defaults to false):
 - When true, activates 500ms suppression period
@@ -44,7 +44,7 @@ Added `suppressCombo` parameter (defaults to false):
 - Keyboard triggers (F5/F6) don't use suppression
 - Shows debug message during suppression period
 
-### 3. ENHANCED RecorderSampleController (Lines 902-965)
+### 3. ENHANCED RecorderSampleController
 
 Added suppression period checking:
 - Checks if currently in suppression window
@@ -52,7 +52,7 @@ Added suppression period checking:
 - Announces when suppression ends and recording begins
 - Only records controller input after suppression period
 
-### 4. OVERHAULED CONTROLLER COMBO LOGIC (Lines 298-350)
+### 4. OVERHAULED CONTROLLER COMBO LOGIC
 
 Made controller combos work like keyboard hotkeys:
 
@@ -62,40 +62,35 @@ Made controller combos work like keyboard hotkeys:
 - Stops playback if currently playing
 - Consistent with F5/F6 behavior
 
-**Start button now:**
-- Starts playback if recording exists (like F12)
-- Pauses/resumes playback if already playing
-- Only works when not recording (like F12)
-
 **Improved comments:** Added clear documentation for what each combo does
 
 ### 5. COMPREHENSIVE DEBUG OUTPUT
 
 Added debug messages at every critical point:
 
-**On script startup (Lines 75-89):**
+**On script startup:**
 - Shows if XInput initialized successfully or failed
 - Shows which DLLs were found and loaded
 
-**When starting recording (Lines 704-721):**
+**When starting recording:**
 - Checks XInput readiness before starting
 - Checks if controller is detected
 - Shows controller button state to confirm it's working
 - PREVENTS recording from starting if controller not detected
 
-**During recording (Lines 912-964):**
+**During recording:**
 - Shows suppression countdown every 0.5 seconds
 - Shows controller state every second
 - Shows when first event is recorded
 - Shows when subsequent events are recorded
 - Identifies if controller state becomes empty
 
-**When stopping recording (Lines 988-1002):**
+**When stopping recording:**
 - Shows total events captured
 - Shows if any controller events were recorded
 - Helps diagnose empty recordings
 
-**In XInput initialization (Lines 1036-1077):**
+**In XInput initialization:**
 - Shows which XInput DLLs were found
 - Shows which DLL successfully loaded
 - Shows specific errors (no DLLs, load failed, etc.)
@@ -109,15 +104,15 @@ RECORDING CONTROLS:
   --------          ----------                    ------
   F5/F6             L1+L2+R1+R2+A                Start/Stop recording
   Esc (recording)   L1+L2+R1+R2+A                Stop recording
-  F12               Start button                  Toggle playback
+  F12               F12                           Toggle playback
   F12 (playing)     L1+L2+R1+R2+A (playing)      Stop playback
   Esc (playing)     -                             Stop playback
 
 PLAYBACK CONTROLS:
   Keyboard          Controller                    Action
   --------          ----------                    ------
-  F12               Start button                  Start playback
-  F12 (playing)     Start button (playing)        Pause/Resume
+  F12               F12                           Start playback
+  F12 (playing)     F12 (playing)                 Pause/Resume
 
 CANCEL/RESET:
   Keyboard          Controller                    Action
@@ -172,11 +167,11 @@ TESTING INSTRUCTIONS:
    - Should see: "Recording stopped! Total events: [number]"
    - Total events should be > 0
 
-6. **Press Start button to play back**
+6. **Press F12 to play back**
    - Recording should play without triggering the combo
 
-7. **Press Start button during playback to pause**
-   - Should pause/resume like F12 does
+7. **Press F12 during playback to pause**
+   - Should pause/resume
 
 8. **Press L1+L2+R1+R2+A during playback to stop**
    - Should stop playback cleanly
@@ -194,7 +189,7 @@ If you see "DEBUG: NO CONTROLLER DETECTED":
   → Controller must support XInput (not just DirectInput)
 
 If suppression doesn't work (combo gets recorded):
-  → Increase suppression time in line 693 (change 500 to 1000)
+  → Increase suppression time in StartRecorder() (change 500 to 1000)
 
 If recording captures nothing:
   → Check debug messages during recording
@@ -206,13 +201,8 @@ REVERTING CHANGES:
 ------------------
 
 If you want to remove the debug output later (once everything works):
-1. Remove lines 75-89 (startup debug)
-2. Remove lines 694-695 (suppression debug)
-3. Remove lines 916-920 (suppression countdown)
-4. Remove lines 923-928 (suppression end message)
-5. Remove lines 935-936, 941-944, 954-955, 963 (recording debug)
-6. Remove lines 997-1002 (finalize debug)
-7. Remove lines 1047-1057, 1067-1074 (XInput debug)
+Search for DebugTip() calls throughout Macros.ahk and remove them.
+The debug system itself (Lib/Debug.ahk) can remain available for future use.
 
 The suppression system itself should stay - it's what prevents the combo
 from being recorded!

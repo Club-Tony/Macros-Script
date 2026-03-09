@@ -50,7 +50,7 @@ Stop recording with L1+L2+R1+R2+A
        ↓
 "Recording stopped! Total events: 2"
        ↓
-Start playback with Start button
+Start playback with F12
        ↓
 Playback event 1: X pressed ← NO COMBO TRIGGERED!
 Playback event 2: X released
@@ -109,26 +109,25 @@ CONTROLLER HOTKEY STATE MACHINE:
 STATE: Not Recording, Not Playing
   ↓
   ├─ Press L1+L2+R1+R2+A → START RECORDING (with suppression)
-  ├─ Press Start button  → (no action, no recording exists)
+  ├─ Press F12            → (no action, no recording exists)
   └─ Press L1+L2+R1+R2+X → (no action, nothing to stop)
 
 STATE: Recording Active
   ↓
   ├─ Press L1+L2+R1+R2+A → STOP RECORDING
-  ├─ Press Start button  → (ignored, can't play while recording)
-  ├─ Press Share/Back    → CANCEL RECORDING
+  ├─ Press Share/Back     → CANCEL RECORDING
   └─ Press L1+L2+R1+R2+X → CANCEL RECORDING
 
 STATE: Recording Exists, Not Playing
   ↓
   ├─ Press L1+L2+R1+R2+A → START RECORDING (new recording, replaces old)
-  ├─ Press Start button  → START PLAYBACK
+  ├─ Press F12            → START PLAYBACK
   └─ Press L1+L2+R1+R2+X → CLEAR RECORDING
 
 STATE: Playing Back
   ↓
   ├─ Press L1+L2+R1+R2+A → STOP PLAYBACK
-  ├─ Press Start button  → PAUSE/RESUME PLAYBACK
+  ├─ Press F12            → PAUSE/RESUME PLAYBACK
   └─ Press L1+L2+R1+R2+X → STOP PLAYBACK
 
 
@@ -166,7 +165,7 @@ Press L1+L2+R1+R2+A (stop recording):
   "DEBUG: Recording stopped! Total events: 15 | Has controller events: 1"
   "Recording stopped - F12 toggles playback"
 
-Press Start button (start playback):
+Press F12 (start playback):
   "Playing recorded macro (F12 to stop)"
 
 
