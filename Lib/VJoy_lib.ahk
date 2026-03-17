@@ -426,7 +426,7 @@ VJoy_Close() {
     VJoy_ResetAll()
  
     for idx, dev in VJDev
-        dev.delete
+        VJDev[idx] := ""
     if (hVJDLL) {
         DLLCall("FreeLibrary", "Ptr", hVJDLL)
         hVJDLL:=
