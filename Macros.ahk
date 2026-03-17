@@ -100,6 +100,7 @@ EnsureXInputReady()
 
 SetTimer, ControllerComboPoll, % controllerComboPollMs
 SetTimer, ControllerInputBoxHelper, 100  ; Monitor for InputBoxes and allow A button to confirm
+OnExit("CleanupTimers")
 
 return
 
@@ -247,6 +248,12 @@ CloseMenu(reason := "", skipReload := false)
 DelayedReload:
     Reload
 return
+
+CleanupTimers(exitReason, exitCode)
+{
+    SetTimer, ControllerComboPoll, Off
+    SetTimer, ControllerInputBoxHelper, Off
+}
 
 
 ControllerComboPoll:
@@ -1260,7 +1267,7 @@ RecorderPlayNext:
         }
         if (evt.type = "key")
         {
-            SendEventOrInput("{" evt.code " " evt.state "}", evt.state)
+            SendEventOrInput("{" evt.code " " evt.state "}")
         }
         else if (evt.type = "mousebtn")
         {
@@ -1321,7 +1328,7 @@ RecorderPlayNext:
     }
 return
 
-SendEventOrInput(seq, state := "")
+SendEventOrInput(seq)
 {
     ; Use a stable send path for recorder playback to avoid unexpected window drags.
     global recorderSendMode, sendMode
@@ -1958,9 +1965,9 @@ TryLoadVJoyDll()
     candidates := []
     for index, base in bases
     {
-        candidates.Push(base "\\vJoy\\x64\\vJoyInterface.dll")
-        candidates.Push(base "\\vJoy\\x86\\vJoyInterface.dll")
-        candidates.Push(base "\\vJoy\\vJoyInterface.dll")
+        candidates.Push(base "\vJoy\x64\vJoyInterface.dll")
+        candidates.Push(base "\vJoy\x86\vJoyInterface.dll")
+        candidates.Push(base "\vJoy\vJoyInterface.dll")
     }
     for index, path in candidates
     {
