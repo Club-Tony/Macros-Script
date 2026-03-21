@@ -14,6 +14,17 @@ AutoHotkey v1 macro automation script providing fast clicking, key holds, autocl
 - `XInput.ahk` - Xbox controller API wrapper (XInput DLL interface)
 - `VJoy_lib.ahk` - Virtual joystick driver interface for controller playback
 - `Recorder_Keys.ahk` - Keyboard/mouse hook definitions for macro recording
+- `Slots.ahk` - Named slot save/load/import/export + sequencer (pipe-delimited events in `macros_events/`)
+- `Profiles.ahk` - Per-game compatibility profiles with auto-detection via WinGet
+- `TrayMenu.ahk` - System tray icon (4 states) + right-click menu
+
+**AHK v2 port** (`Macros_v2.ahk` + `Lib_v2/`): Full feature parity using classes (`SlotManager`, `ProfileManager`, `TrayMenuManager`). Shares same `.ini` data format.
+
+**Data files** (auto-created on first run):
+- `macros.ini` - slot metadata and sequence definitions
+- `macros_events/*.txt` - one file per slot, pipe-delimited event data
+- `profiles.ini` - per-game compatibility profiles
+- `icons/` - 4 tray icon states (idle/recording/playing/paused)
 
 **State Machine Pattern**: The script uses global state variables with `#If` context-sensitive hotkeys to manage different modes (menu active, slash macro on, autoclicker ready, recorder active, etc.).
 
@@ -32,7 +43,11 @@ AutoHotkey v1 macro automation script providing fast clicking, key holds, autocl
 - Button combos: `L1+L2+R1+R2+A/B/Y/X` for various functions
 - 500ms suppression period prevents recording the trigger combo itself
 
-**SendMode Toggle** (`Ctrl+Alt+P`): Switches between `SendInput` (default) and `SendPlay` for compatibility with games that block SendInput.
+**SendMode Cycle** (`Ctrl+Alt+P`): Cycles `SendInput` → `SendPlay` → `SendEvent` for game compatibility.
+
+**Per-game profiles** (`profiles.ini`): Auto-detected on menu open by foreground process name. Each profile sets SendMode + vJoyDeviceId.
+
+**Named slots** (`macros.ini` + `macros_events/`): Recordings persist across reloads. Saved after each recording with a user-chosen name. Accessible from the tray menu.
 
 ## Hotkeys Reference
 
@@ -41,9 +56,11 @@ AutoHotkey v1 macro automation script providing fast clicking, key holds, autocl
 | `Ctrl+Shift+Alt+Z` | Open macro menu |
 | `Ctrl+Alt+T` | Show hotkey help (only when menu is open) |
 | `Ctrl+Esc` | Reload script |
-| `Ctrl+Alt+P` | Toggle SendMode (Input/Play) |
+| `Ctrl+Alt+P` | Cycle SendMode (Input → Play → Event) |
+| `Ctrl+Alt+D` | Toggle debug mode |
 | `Esc` | Cancel/exit current macro mode |
 | `F12` | Toggle playback (after recording) |
+| Right-click tray | Full menu: slots, sequences, profiles, speed, loop mode |
 
 ## Development Notes
 
