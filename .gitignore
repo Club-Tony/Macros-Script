@@ -1,2 +1,5 @@
 # Project agents installed via distribution (Ctrl+Alt+Shift+A)
 .claude/agents/
+
+# Build artifacts
+MacrosEngine/build/
