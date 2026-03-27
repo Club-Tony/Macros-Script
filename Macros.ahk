@@ -401,6 +401,12 @@ CleanupTimers(exitReason, exitCode)
 {
     SetTimer, ControllerComboPoll, Off
     SetTimer, ControllerInputBoxHelper, Off
+    SetTimer, MacroGuiStatusTick, Off
+    SetTimer, RecorderSampleMouse, Off
+    SetTimer, RecorderSampleController, Off
+    SetTimer, HoldMacroControllerPoll, Off
+    SetTimer, PureHoldControllerPoll, Off
+    SetTimer, PlaybackLoopPromptCountdownTick, Off
 }
 
 
