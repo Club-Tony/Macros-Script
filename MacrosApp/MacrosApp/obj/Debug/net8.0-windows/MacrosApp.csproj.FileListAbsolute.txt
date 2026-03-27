@@ -1,0 +1,15 @@
+C:\Users\Davey\Documents\GitHub\Repositories\Macros-Script\MacrosApp\MacrosApp\obj\Debug\net8.0-windows\MacrosApp.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\Davey\Documents\GitHub\Repositories\Macros-Script\MacrosApp\MacrosApp\obj\Debug\net8.0-windows\MacrosApp.AssemblyInfoInputs.cache
+C:\Users\Davey\Documents\GitHub\Repositories\Macros-Script\MacrosApp\MacrosApp\obj\Debug\net8.0-windows\MacrosApp.AssemblyInfo.cs
+C:\Users\Davey\Documents\GitHub\Repositories\Macros-Script\MacrosApp\MacrosApp\obj\Debug\net8.0-windows\MacrosApp.csproj.CoreCompileInputs.cache
+C:\Users\Davey\Documents\GitHub\Repositories\Macros-Script\MacrosApp\MacrosApp\obj\Debug\net8.0-windows\MacrosApp.sourcelink.json
+C:\Users\Davey\Documents\GitHub\Repositories\Macros-Script\MacrosApp\MacrosApp\bin\Debug\net8.0-windows\MacrosApp.exe
+C:\Users\Davey\Documents\GitHub\Repositories\Macros-Script\MacrosApp\MacrosApp\bin\Debug\net8.0-windows\MacrosApp.deps.json
+C:\Users\Davey\Documents\GitHub\Repositories\Macros-Script\MacrosApp\MacrosApp\bin\Debug\net8.0-windows\MacrosApp.runtimeconfig.json
+C:\Users\Davey\Documents\GitHub\Repositories\Macros-Script\MacrosApp\MacrosApp\bin\Debug\net8.0-windows\MacrosApp.dll
+C:\Users\Davey\Documents\GitHub\Repositories\Macros-Script\MacrosApp\MacrosApp\bin\Debug\net8.0-windows\MacrosApp.pdb
+C:\Users\Davey\Documents\GitHub\Repositories\Macros-Script\MacrosApp\MacrosApp\obj\Debug\net8.0-windows\MacrosApp.dll
+C:\Users\Davey\Documents\GitHub\Repositories\Macros-Script\MacrosApp\MacrosApp\obj\Debug\net8.0-windows\refint\MacrosApp.dll
+C:\Users\Davey\Documents\GitHub\Repositories\Macros-Script\MacrosApp\MacrosApp\obj\Debug\net8.0-windows\MacrosApp.pdb
+C:\Users\Davey\Documents\GitHub\Repositories\Macros-Script\MacrosApp\MacrosApp\obj\Debug\net8.0-windows\MacrosApp.genruntimeconfig.cache
+C:\Users\Davey\Documents\GitHub\Repositories\Macros-Script\MacrosApp\MacrosApp\obj\Debug\net8.0-windows\ref\MacrosApp.dll
