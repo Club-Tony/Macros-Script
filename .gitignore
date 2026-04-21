@@ -1,2 +1,5 @@
 # Build artifacts
 MacrosEngine/build/
+MacrosEngine/build-*/
+MacrosApp/**/bin/
+MacrosApp/**/obj/
