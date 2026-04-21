@@ -20,6 +20,8 @@ public struct ControllerState
 public static class NativeEngine
 {
     private const string DllName = "MacrosEngine.dll";
+    // We only need a temporary native buffer large enough for the engine to parse and copy.
+    private const int MaxNativeMacroEventBytes = 64;
 
     private static bool _available;
     private static bool _checked;
@@ -36,7 +38,7 @@ public static class NativeEngine
                 _checked = true;
                 try
                 {
-                    var version = Engine_GetVersion();
+                    var version = Marshal.PtrToStringAnsi(Engine_GetVersion());
                     _available = version != null;
                 }
                 catch (DllNotFoundException)
@@ -105,6 +107,10 @@ public static class NativeEngine
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Engine_GetRecordedEvents(IntPtr buffer, uint bufferSize, out uint outCount);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
     public static extern bool Engine_RecordKeyEvent(
         [MarshalAs(UnmanagedType.I1)] bool down, ushort vkCode, ushort scanCode);
 
@@ -162,8 +168,7 @@ public static class NativeEngine
     // ================================================================
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
-    [return: MarshalAs(UnmanagedType.LPStr)]
-    public static extern string Engine_GetVersion();
+    public static extern IntPtr Engine_GetVersion();
 
     // ================================================================
     // Safe wrappers that check availability first
@@ -223,6 +228,79 @@ public static class NativeEngine
         catch { return false; }
     }
 
+    public static uint TryGetRecordedEventCount()
+    {
+        if (!IsAvailable) return 0;
+        try { return Engine_GetRecordedEventCount(); }
+        catch { return 0; }
+    }
+
+    public static bool TryGetRecordedEventsBuffer(out IntPtr buffer, out uint count)
+    {
+        buffer = IntPtr.Zero;
+        count = 0;
+
+        if (!IsAvailable)
+            return false;
+
+        try
+        {
+            uint capacity = Engine_GetRecordedEventCount();
+            if (capacity == 0)
+                return false;
+
+            long bytes = checked((long)capacity * MaxNativeMacroEventBytes);
+            buffer = Marshal.AllocHGlobal((IntPtr)bytes);
+            if (!Engine_GetRecordedEvents(buffer, capacity, out count) || count == 0)
+            {
+                Marshal.FreeHGlobal(buffer);
+                buffer = IntPtr.Zero;
+                count = 0;
+                return false;
+            }
+
+            return true;
+        }
+        catch
+        {
+            if (buffer != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(buffer);
+                buffer = IntPtr.Zero;
+            }
+            count = 0;
+            return false;
+        }
+    }
+
+    public static bool TryRecordKeyEvent(bool down, ushort vkCode, ushort scanCode)
+    {
+        if (!IsAvailable) return false;
+        try { return Engine_RecordKeyEvent(down, vkCode, scanCode); }
+        catch { return false; }
+    }
+
+    public static bool TryRecordMouseMove(int x, int y)
+    {
+        if (!IsAvailable) return false;
+        try { return Engine_RecordMouseMove(x, y); }
+        catch { return false; }
+    }
+
+    public static bool TryRecordMouseButton(bool down, ushort button)
+    {
+        if (!IsAvailable) return false;
+        try { return Engine_RecordMouseButton(down, button); }
+        catch { return false; }
+    }
+
+    public static bool TryRecordMouseWheel(int delta)
+    {
+        if (!IsAvailable) return false;
+        try { return Engine_RecordMouseWheel(delta); }
+        catch { return false; }
+    }
+
     public static bool TryStartPlayback(IntPtr events, uint count, uint loopCount)
     {
         if (!IsAvailable) return false;
@@ -260,5 +338,82 @@ public static class NativeEngine
     {
         if (!IsAvailable) return;
         try { Engine_ResumePlayback(); } catch { }
+    }
+
+    public static bool TrySaveEventsToFile(string path, IntPtr events, uint count)
+    {
+        if (!IsAvailable) return false;
+        try { return Engine_SaveEventsToFile(path, events, count); }
+        catch { return false; }
+    }
+
+    public static bool TryLoadPlaybackBuffer(string path, out IntPtr buffer, out uint count)
+    {
+        buffer = IntPtr.Zero;
+        count = 0;
+
+        if (!IsAvailable || string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            return false;
+
+        try
+        {
+            uint capacity = EstimateEventCapacity(path);
+            if (capacity == 0)
+                return false;
+
+            long bytes = checked((long)capacity * MaxNativeMacroEventBytes);
+            buffer = Marshal.AllocHGlobal((IntPtr)bytes);
+            count = Engine_LoadEventsFromFile(path, buffer, capacity);
+            if (count == 0)
+            {
+                Marshal.FreeHGlobal(buffer);
+                buffer = IntPtr.Zero;
+                return false;
+            }
+
+            return true;
+        }
+        catch
+        {
+            if (buffer != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(buffer);
+                buffer = IntPtr.Zero;
+            }
+            count = 0;
+            return false;
+        }
+    }
+
+    public static void FreePlaybackBuffer(IntPtr buffer)
+    {
+        if (buffer == IntPtr.Zero)
+            return;
+
+        Marshal.FreeHGlobal(buffer);
+    }
+
+    public static void FreeRecordedEventsBuffer(IntPtr buffer)
+    {
+        if (buffer == IntPtr.Zero)
+            return;
+
+        Marshal.FreeHGlobal(buffer);
+    }
+
+    private static uint EstimateEventCapacity(string path)
+    {
+        uint count = 0;
+
+        foreach (var rawLine in File.ReadLines(path))
+        {
+            var line = rawLine.Trim();
+            if (line.Length == 0 || line.StartsWith(';'))
+                continue;
+
+            count++;
+        }
+
+        return count;
     }
 }

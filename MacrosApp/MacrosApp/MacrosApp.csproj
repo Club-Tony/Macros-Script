@@ -8,4 +8,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
+  <Target Name="CopyMacrosEngineX64" AfterTargets="Build" Condition="Exists('..\..\MacrosEngine\build-x64\MacrosEngine.dll')">
+    <Copy SourceFiles="..\..\MacrosEngine\build-x64\MacrosEngine.dll"
+          DestinationFiles="$(OutDir)MacrosEngine.dll" />
+  </Target>
+
 </Project>

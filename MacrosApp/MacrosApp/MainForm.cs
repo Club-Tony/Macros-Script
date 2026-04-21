@@ -8,6 +8,9 @@ public partial class MainForm : Form
     private SlotManager _slotManager = null!;
     private ProfileManager _profileManager = null!;
     private MacroSettings _settings = new();
+    private RecordingInputHook? _recordingInputHook;
+    private DateTime _recordingIgnoreUntilUtc = DateTime.MinValue;
+    private bool _hotkeysSuspended;
 
     // Current macro state
     private MacroState _currentState = MacroState.Idle;
@@ -129,7 +132,6 @@ public partial class MainForm : Form
         {
             engineStatusLabel.Text = "Engine: loaded";
             engineStatusLabel.ForeColor = Color.FromArgb(100, 200, 100);
-            controllerState.StartRefresh();
         }
         else
         {
@@ -146,10 +148,15 @@ public partial class MainForm : Form
     {
         _hotkeyManager.RegisterAll();
 
-        // Try to initialize the native engine
-        if (NativeEngine.IsAvailable)
+        if (NativeEngine.IsAvailable && NativeEngine.TryInit())
         {
-            NativeEngine.TryInit();
+            NativeEngine.TryStartPolling(16);
+            controllerState.StartRefresh();
+        }
+        else if (NativeEngine.IsAvailable)
+        {
+            engineStatusLabel.Text = "Engine: init failed";
+            engineStatusLabel.ForeColor = Color.FromArgb(200, 130, 50);
         }
     }
 
@@ -164,6 +171,7 @@ public partial class MainForm : Form
         }
 
         // Actual shutdown
+        DisposeRecordingHook();
         _hotkeyManager.Dispose();
         controllerState.StopRefresh();
         NativeEngine.TryShutdown();
@@ -206,6 +214,7 @@ public partial class MainForm : Form
     {
         _isExiting = true;
 
+        DisposeRecordingHook();
         _hotkeyManager.Dispose();
         controllerState.StopRefresh();
         NativeEngine.TryShutdown();
@@ -235,6 +244,16 @@ public partial class MainForm : Form
 
     private void OnHotkeyPressed(int hotkeyId)
     {
+        if (_hotkeysSuspended)
+            return;
+
+        if (_activeMacroType == MacroType.Recorder)
+        {
+            if (hotkeyId == HotkeyManager.HOTKEY_RECORDER || hotkeyId == HotkeyManager.HOTKEY_CANCEL)
+                DeactivateCurrentMacro();
+            return;
+        }
+
         switch (hotkeyId)
         {
             case HotkeyManager.HOTKEY_SLASH_MACRO:
@@ -306,15 +325,16 @@ public partial class MainForm : Form
                 HighlightButton(btnPureHold, true);
                 break;
             case MacroType.Recorder:
-                if (NativeEngine.TryStartRecording())
+                if (StartRecordingSession())
                 {
                     SetState(MacroState.Recording, "Recording...");
+                    HighlightButton(btnRecorder, true);
                 }
                 else
                 {
-                    SetState(MacroState.Recording, "Recording (managed)...");
+                    _activeMacroType = null;
+                    SetState(MacroState.Idle, "Recorder unavailable");
                 }
-                HighlightButton(btnRecorder, true);
                 break;
         }
     }
@@ -323,7 +343,8 @@ public partial class MainForm : Form
     {
         if (_activeMacroType == MacroType.Recorder)
         {
-            NativeEngine.TryStopRecording();
+            FinalizeRecording();
+            return;
         }
 
         _activeMacroType = null;
@@ -349,8 +370,42 @@ public partial class MainForm : Form
 
     private void PlaySlot(MacroSlot slot)
     {
-        SetState(MacroState.Playing, $"Playing: {slot.Name}");
-        // Actual playback would go through NativeEngine here
+        if (!NativeEngine.TryInit())
+        {
+            SetState(MacroState.Idle, "Engine unavailable");
+            return;
+        }
+
+        string eventPath = _slotManager.GetEventFilePath(slot.Name);
+        if (!File.Exists(eventPath))
+        {
+            SetState(MacroState.Idle, $"Missing events: {slot.Name}");
+            return;
+        }
+
+        if (!NativeEngine.TryLoadPlaybackBuffer(eventPath, out var buffer, out uint count))
+        {
+            SetState(MacroState.Idle, $"Unable to load: {slot.Name}");
+            return;
+        }
+
+        try
+        {
+            if (NativeEngine.TryIsPlaying())
+                NativeEngine.TryStopPlayback();
+
+            if (!NativeEngine.TryStartPlayback(buffer, count, (uint)Math.Max(0, _settings.LoopCount)))
+            {
+                SetState(MacroState.Idle, $"Playback failed: {slot.Name}");
+                return;
+            }
+
+            SetState(MacroState.Playing, $"Playing: {slot.Name}");
+        }
+        finally
+        {
+            NativeEngine.FreePlaybackBuffer(buffer);
+        }
     }
 
     private void CancelCurrentOperation()
@@ -364,6 +419,156 @@ public partial class MainForm : Form
             NativeEngine.TryStopPlayback();
             SetState(MacroState.Idle, "Idle");
         }
+    }
+
+    private bool StartRecordingSession()
+    {
+        if (!NativeEngine.TryInit() || !NativeEngine.TryStartRecording())
+            return false;
+
+        DisposeRecordingHook();
+
+        var hook = new RecordingInputHook();
+        hook.KeyCaptured += OnRecordedKeyCaptured;
+        hook.MouseMoveCaptured += OnRecordedMouseMoveCaptured;
+        hook.MouseButtonCaptured += OnRecordedMouseButtonCaptured;
+        hook.MouseWheelCaptured += OnRecordedMouseWheelCaptured;
+
+        if (!hook.Start())
+        {
+            hook.Dispose();
+            NativeEngine.TryStopRecording();
+            return false;
+        }
+
+        _recordingInputHook = hook;
+        _recordingIgnoreUntilUtc = DateTime.UtcNow.AddMilliseconds(200);
+        return true;
+    }
+
+    private void FinalizeRecording()
+    {
+        DisposeRecordingHook();
+        NativeEngine.TryStopRecording();
+
+        _activeMacroType = null;
+        ResetAllButtons();
+
+        uint recordedCount = NativeEngine.TryGetRecordedEventCount();
+        if (recordedCount == 0)
+        {
+            SetState(MacroState.Idle, "Recording discarded");
+            return;
+        }
+
+        string defaultName = slotList.SelectedSlot?.Name ?? $"recording-{DateTime.Now:yyyyMMdd-HHmmss}";
+        _hotkeysSuspended = true;
+        string? slotName;
+        try
+        {
+            slotName = ShowInputDialog("Save Recording", "Name this recording:", defaultName);
+        }
+        finally
+        {
+            _hotkeysSuspended = false;
+        }
+
+        if (slotName == null)
+        {
+            SetState(MacroState.Idle, "Recording discarded");
+            return;
+        }
+
+        slotName = string.IsNullOrWhiteSpace(slotName) ? defaultName : slotName.Trim();
+        if (!PersistRecordedEvents(slotName, out uint savedCount))
+        {
+            SetState(MacroState.Idle, $"Save failed: {slotName}");
+            return;
+        }
+
+        RefreshSlotList();
+        SetState(MacroState.Idle, $"Saved: {slotName} ({savedCount} events)");
+    }
+
+    private bool PersistRecordedEvents(string slotName, out uint savedCount)
+    {
+        savedCount = 0;
+
+        if (!NativeEngine.TryGetRecordedEventsBuffer(out var buffer, out uint count))
+            return false;
+
+        try
+        {
+            string eventPath = _slotManager.GetEventFilePath(slotName);
+            if (!NativeEngine.TrySaveEventsToFile(eventPath, buffer, count))
+                return false;
+
+            _slotManager.SaveSlot(new MacroSlot
+            {
+                Name = slotName,
+                EventCount = (int)count,
+                CoordMode = "screen",
+                Recorded = DateTime.Now.ToString("yyyy-MM-dd")
+            });
+
+            savedCount = count;
+            return true;
+        }
+        finally
+        {
+            NativeEngine.FreeRecordedEventsBuffer(buffer);
+        }
+    }
+
+    private void DisposeRecordingHook()
+    {
+        if (_recordingInputHook == null)
+            return;
+
+        _recordingInputHook.Dispose();
+        _recordingInputHook = null;
+    }
+
+    private void OnRecordedKeyCaptured(ushort vkCode, ushort scanCode, bool down)
+    {
+        if (ShouldIgnoreRecordedInput() || IsRecorderControlKey(vkCode))
+            return;
+
+        NativeEngine.TryRecordKeyEvent(down, vkCode, scanCode);
+    }
+
+    private void OnRecordedMouseMoveCaptured(int x, int y)
+    {
+        if (ShouldIgnoreRecordedInput())
+            return;
+
+        NativeEngine.TryRecordMouseMove(x, y);
+    }
+
+    private void OnRecordedMouseButtonCaptured(ushort button, bool down)
+    {
+        if (ShouldIgnoreRecordedInput())
+            return;
+
+        NativeEngine.TryRecordMouseButton(down, button);
+    }
+
+    private void OnRecordedMouseWheelCaptured(int delta)
+    {
+        if (ShouldIgnoreRecordedInput())
+            return;
+
+        NativeEngine.TryRecordMouseWheel(delta);
+    }
+
+    private bool ShouldIgnoreRecordedInput()
+    {
+        return DateTime.UtcNow < _recordingIgnoreUntilUtc;
+    }
+
+    private static bool IsRecorderControlKey(ushort vkCode)
+    {
+        return vkCode == (ushort)Keys.F5 || vkCode == (ushort)Keys.Escape;
     }
 
     // ================================================================

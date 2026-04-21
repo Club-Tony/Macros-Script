@@ -15,6 +15,13 @@ add_library(MacrosEngine SHARED
     src/timing.c
 )
 
+if(WIN32)
+    set_target_properties(MacrosEngine PROPERTIES
+        PREFIX ""
+        OUTPUT_NAME "MacrosEngine"
+    )
+endif()
+
 target_include_directories(MacrosEngine PUBLIC include)
 target_link_libraries(MacrosEngine PRIVATE winmm)
 target_compile_definitions(MacrosEngine PRIVATE MACROS_ENGINE_EXPORTS)

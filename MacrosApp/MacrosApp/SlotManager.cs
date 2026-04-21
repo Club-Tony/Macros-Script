@@ -24,57 +24,16 @@ public class SlotManager
     public List<MacroSlot> LoadSlots()
     {
         var slots = new List<MacroSlot>();
-
-        if (!File.Exists(_iniPath))
-            return slots;
-
-        var lines = File.ReadAllLines(_iniPath);
-        var slotNames = new List<string>();
-        string? currentSection = null;
-        var sectionData = new Dictionary<string, Dictionary<string, string>>();
-
-        foreach (var rawLine in lines)
-        {
-            var line = rawLine.Trim().Replace("\0", ""); // Handle UTF-16 artifacts
-            if (string.IsNullOrEmpty(line) || line.StartsWith(";"))
-                continue;
-
-            if (line.StartsWith("[") && line.EndsWith("]"))
-            {
-                currentSection = line[1..^1];
-                if (!sectionData.ContainsKey(currentSection))
-                    sectionData[currentSection] = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                continue;
-            }
-
-            if (currentSection != null && line.Contains('='))
-            {
-                var eqIdx = line.IndexOf('=');
-                var key = line[..eqIdx].Trim();
-                var val = line[(eqIdx + 1)..].Trim();
-                sectionData[currentSection][key] = val;
-            }
-        }
+        var ini = LoadIniDocument();
+        var slotNames = GetRegisteredSlotNames(ini);
 
         // Read slot list from [Slots] section
-        if (sectionData.TryGetValue("Slots", out var slotsSection))
-        {
-            if (slotsSection.TryGetValue("count", out var countStr) && int.TryParse(countStr, out int count))
-            {
-                for (int i = 1; i <= count; i++)
-                {
-                    if (slotsSection.TryGetValue($"slot_{i}", out var name))
-                        slotNames.Add(name);
-                }
-            }
-        }
-
         // Build MacroSlot objects
         foreach (var name in slotNames)
         {
             var slot = new MacroSlot { Name = name };
 
-            if (sectionData.TryGetValue(name, out var data))
+            if (ini.Sections.TryGetValue(name, out var data))
             {
                 if (data.TryGetValue("event_count", out var ec) && int.TryParse(ec, out int eventCount))
                     slot.EventCount = eventCount;
@@ -98,6 +57,7 @@ public class SlotManager
     /// </summary>
     public void SaveSlot(MacroSlot slot)
     {
+        slot.Name = SanitizeSlotName(slot.Name);
         var slots = LoadSlots();
         var existing = slots.FindIndex(s => s.Name.Equals(slot.Name, StringComparison.OrdinalIgnoreCase));
         if (existing >= 0)
@@ -113,11 +73,12 @@ public class SlotManager
     /// </summary>
     public void DeleteSlot(string name)
     {
+        name = SanitizeSlotName(name);
         var slots = LoadSlots();
         slots.RemoveAll(s => s.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
         WriteIni(slots);
 
-        var eventFile = Path.Combine(_eventsDir, $"{name}.txt");
+        var eventFile = GetEventFilePath(name);
         if (File.Exists(eventFile))
             File.Delete(eventFile);
     }
@@ -127,6 +88,8 @@ public class SlotManager
     /// </summary>
     public void RenameSlot(string oldName, string newName)
     {
+        oldName = SanitizeSlotName(oldName);
+        newName = SanitizeSlotName(newName);
         var slots = LoadSlots();
         var slot = slots.Find(s => s.Name.Equals(oldName, StringComparison.OrdinalIgnoreCase));
         if (slot == null) return;
@@ -134,8 +97,8 @@ public class SlotManager
         slot.Name = newName;
         WriteIni(slots);
 
-        var oldFile = Path.Combine(_eventsDir, $"{oldName}.txt");
-        var newFile = Path.Combine(_eventsDir, $"{newName}.txt");
+        var oldFile = GetEventFilePath(oldName);
+        var newFile = GetEventFilePath(newName);
         if (File.Exists(oldFile))
         {
             if (File.Exists(newFile))
@@ -147,15 +110,19 @@ public class SlotManager
     /// <summary>
     /// Sanitize a slot name for safe use as a file name.
     /// </summary>
-    private static string SanitizeFileName(string name)
+    private static string SanitizeSlotName(string name)
     {
+        var trimmed = name.Trim();
+        if (trimmed.Length == 0)
+            return "untitled";
+
         var invalid = Path.GetInvalidFileNameChars();
-        var sanitized = new System.Text.StringBuilder(name.Length);
-        foreach (char c in name)
+        var sanitized = new System.Text.StringBuilder(trimmed.Length);
+        foreach (char c in trimmed)
         {
             sanitized.Append(Array.IndexOf(invalid, c) >= 0 ? '_' : c);
         }
-        return sanitized.ToString();
+        return sanitized.Length == 0 ? "untitled" : sanitized.ToString();
     }
 
     /// <summary>
@@ -163,12 +130,17 @@ public class SlotManager
     /// </summary>
     public string[] GetSlotEvents(string name)
     {
-        var safeName = SanitizeFileName(name);
-        var eventFile = Path.Combine(_eventsDir, $"{safeName}.txt");
+        var eventFile = GetEventFilePath(name);
         if (!File.Exists(eventFile))
             return Array.Empty<string>();
 
         return File.ReadAllLines(eventFile);
+    }
+
+    public string GetEventFilePath(string name)
+    {
+        var safeName = SanitizeSlotName(name);
+        return Path.Combine(_eventsDir, $"{safeName}.txt");
     }
 
     /// <summary>
@@ -176,7 +148,7 @@ public class SlotManager
     /// </summary>
     public void SaveSlotEvents(string name, string[] events)
     {
-        var eventFile = Path.Combine(_eventsDir, $"{name}.txt");
+        var eventFile = GetEventFilePath(name);
         File.WriteAllLines(eventFile, events);
     }
 
@@ -185,7 +157,7 @@ public class SlotManager
     /// </summary>
     public bool ExportSlot(string name, string destinationPath)
     {
-        var eventFile = Path.Combine(_eventsDir, $"{name}.txt");
+        var eventFile = GetEventFilePath(name);
         if (!File.Exists(eventFile))
             return false;
 
@@ -227,25 +199,134 @@ public class SlotManager
 
     private void WriteIni(List<MacroSlot> slots)
     {
-        using var writer = new StreamWriter(_iniPath, false, System.Text.Encoding.UTF8);
+        var ini = LoadIniDocument();
+        var existingSlotNames = GetRegisteredSlotNames(ini);
 
-        // [Slots] section
-        writer.WriteLine("[Slots]");
-        writer.WriteLine($"count={slots.Count}");
+        RemoveSection(ini, "Slots");
+        foreach (var existingSlotName in existingSlotNames)
+        {
+            RemoveSection(ini, existingSlotName);
+        }
+
+        var slotsSection = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["count"] = slots.Count.ToString()
+        };
+
         for (int i = 0; i < slots.Count; i++)
         {
-            writer.WriteLine($"slot_{i + 1}={slots[i].Name}");
+            slotsSection[$"slot_{i + 1}"] = SanitizeSlotName(slots[i].Name);
         }
-        writer.WriteLine();
 
-        // Individual slot sections
+        InsertSection(ini, 0, "Slots", slotsSection);
+
+        int insertIndex = 1;
         foreach (var slot in slots)
         {
-            writer.WriteLine($"[{slot.Name}]");
-            writer.WriteLine($"event_count={slot.EventCount}");
-            writer.WriteLine($"coord_mode={slot.CoordMode}");
-            writer.WriteLine($"recorded={slot.Recorded}");
-            writer.WriteLine();
+            string slotName = SanitizeSlotName(slot.Name);
+            InsertSection(
+                ini,
+                insertIndex++,
+                slotName,
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["event_count"] = slot.EventCount.ToString(),
+                    ["coord_mode"] = slot.CoordMode,
+                    ["recorded"] = slot.Recorded
+                });
         }
+
+        using var writer = new StreamWriter(_iniPath, false, System.Text.Encoding.UTF8);
+        for (int i = 0; i < ini.SectionOrder.Count; i++)
+        {
+            string sectionName = ini.SectionOrder[i];
+            if (!ini.Sections.TryGetValue(sectionName, out var section))
+                continue;
+
+            writer.WriteLine($"[{sectionName}]");
+            foreach (var pair in section)
+            {
+                writer.WriteLine($"{pair.Key}={pair.Value}");
+            }
+
+            if (i < ini.SectionOrder.Count - 1)
+                writer.WriteLine();
+        }
+    }
+
+    private IniDocument LoadIniDocument()
+    {
+        var document = new IniDocument();
+        if (!File.Exists(_iniPath))
+            return document;
+
+        string? currentSection = null;
+        foreach (var rawLine in File.ReadAllLines(_iniPath))
+        {
+            var line = rawLine.Trim().Replace("\0", "");
+            if (string.IsNullOrEmpty(line) || line.StartsWith(";"))
+                continue;
+
+            if (line.StartsWith("[") && line.EndsWith("]"))
+            {
+                currentSection = line[1..^1];
+                if (!document.Sections.ContainsKey(currentSection))
+                {
+                    document.SectionOrder.Add(currentSection);
+                    document.Sections[currentSection] = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                }
+                continue;
+            }
+
+            if (currentSection == null || !line.Contains('='))
+                continue;
+
+            int eqIdx = line.IndexOf('=');
+            string key = line[..eqIdx].Trim();
+            string val = line[(eqIdx + 1)..].Trim();
+            document.Sections[currentSection][key] = val;
+        }
+
+        return document;
+    }
+
+    private static List<string> GetRegisteredSlotNames(IniDocument ini)
+    {
+        var slotNames = new List<string>();
+        if (!ini.Sections.TryGetValue("Slots", out var slotsSection))
+            return slotNames;
+
+        if (!slotsSection.TryGetValue("count", out var countStr) || !int.TryParse(countStr, out int count))
+            return slotNames;
+
+        for (int i = 1; i <= count; i++)
+        {
+            if (slotsSection.TryGetValue($"slot_{i}", out var name) && !string.IsNullOrWhiteSpace(name))
+                slotNames.Add(name);
+        }
+
+        return slotNames;
+    }
+
+    private static void RemoveSection(IniDocument ini, string sectionName)
+    {
+        ini.SectionOrder.RemoveAll(name => name.Equals(sectionName, StringComparison.OrdinalIgnoreCase));
+        ini.Sections.Remove(sectionName);
+    }
+
+    private static void InsertSection(IniDocument ini, int index, string sectionName, Dictionary<string, string> values)
+    {
+        RemoveSection(ini, sectionName);
+
+        int boundedIndex = Math.Max(0, Math.Min(index, ini.SectionOrder.Count));
+        ini.SectionOrder.Insert(boundedIndex, sectionName);
+        ini.Sections[sectionName] = values;
+    }
+
+    private sealed class IniDocument
+    {
+        public List<string> SectionOrder { get; } = new();
+        public Dictionary<string, Dictionary<string, string>> Sections { get; } =
+            new(StringComparer.OrdinalIgnoreCase);
     }
 }
