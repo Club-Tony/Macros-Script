@@ -5,6 +5,17 @@ namespace MacrosApp;
 
 public partial class MainForm : Form
 {
+    private static readonly HashSet<Keys> ReservedHoldKeys = new()
+    {
+        Keys.F1,
+        Keys.F2,
+        Keys.F3,
+        Keys.F4,
+        Keys.F5,
+        Keys.F12,
+        Keys.Escape
+    };
+
     private HotkeyManager _hotkeyManager = null!;
     private SlotManager _slotManager = null!;
     private ProfileManager _profileManager = null!;
@@ -14,6 +25,13 @@ public partial class MainForm : Form
     private RecordingInputHook? _recordingInputHook;
     private DateTime _recordingIgnoreUntilUtc = DateTime.MinValue;
     private bool _hotkeysSuspended;
+    private KeyboardToggleBinding? _holdKeyBinding;
+    private System.Threading.Timer? _turboRepeatTimer;
+    private ToolTip _hoverHelp = null!;
+    private Keys _configuredHoldKey = Keys.None;
+    private string _configuredHoldKeyLabel = string.Empty;
+    private bool _holdMacroEngaged;
+    private int _turboRepeatMs = 40;
 
     // Current macro state
     private MacroState _currentState = MacroState.Idle;
@@ -43,6 +61,7 @@ public partial class MainForm : Form
     public MainForm()
     {
         InitializeComponent();
+        InitializeToolTips();
         InitializeManagers();
         WireEvents();
         LoadData();
@@ -113,11 +132,68 @@ public partial class MainForm : Form
         nudLoopCount.ValueChanged += (_, _) => _settings.LoopCount = (int)nudLoopCount.Value;
     }
 
+    private void InitializeToolTips()
+    {
+        _hoverHelp = new ToolTip(components)
+        {
+            AutomaticDelay = 2000,
+            InitialDelay = 2000,
+            ReshowDelay = 500,
+            AutoPopDelay = 12000,
+            ShowAlways = true
+        };
+
+        _hoverHelp.SetToolTip(statusLabel,
+            "Shows the app's current state, such as idle, recording, playback, or hold-mode status.");
+
+        _hoverHelp.SetToolTip(btnSlashMacro,
+            "Stages Slash Macro. Press F12 while active to send a left mouse click.");
+        _hoverHelp.SetToolTip(btnAutoclicker,
+            "Stages the autoclicker. Press F12 while active to start or stop repeated left clicks.");
+        _hoverHelp.SetToolTip(btnTurboHold,
+            "Configures Turbo Hold. You choose a key and repeat speed, then that key toggles rapid repeated presses.");
+        _hoverHelp.SetToolTip(btnPureHold,
+            "Configures Pure Hold. You choose a key, then that key toggles a held-down state until pressed again.");
+        _hoverHelp.SetToolTip(btnRecorder,
+            "Starts keyboard and mouse recording. Press F5 again to stop, then save the recording into a slot.");
+
+        _hoverHelp.SetToolTip(slotHeaderLabel,
+            "Saved recordings loaded from macros.ini and macros_events. Select one to replay, rename, export, or delete it.");
+        slotList.ApplyToolTip(
+            _hoverHelp,
+            "Saved recording slots. Double-click a slot to play it, or right-click for rename, export, and delete actions.");
+
+        _hoverHelp.SetToolTip(settingsHeaderLabel,
+            "Playback and macro settings for the current app session.");
+        _hoverHelp.SetToolTip(lblInterval,
+            "Autoclicker repeat interval in milliseconds.");
+        _hoverHelp.SetToolTip(nudInterval,
+            "Sets how quickly the autoclicker repeats left clicks while it is running.");
+        _hoverHelp.SetToolTip(lblSendMode,
+            "Selected send mode for macro behavior. This is tracked in the UI, but not all playback paths honor it yet.");
+        _hoverHelp.SetToolTip(cmbSendMode,
+            "Choose the current send mode value. Profiles can also set this automatically.");
+        _hoverHelp.SetToolTip(lblLoopCount,
+            "How many times a selected recording should replay. 0 means loop until you stop it.");
+        _hoverHelp.SetToolTip(nudLoopCount,
+            "Sets the playback loop count for selected recording slots. Use 0 for infinite playback.");
+
+        _hoverHelp.SetToolTip(controllerHeaderLabel,
+            "Live controller viewer fed by the native engine's XInput polling.");
+        controllerState.ApplyToolTip(
+            _hoverHelp,
+            "Shows live controller connection state, sticks, triggers, and buttons. This is read-only right now.");
+
+        statusStrip.ShowItemToolTips = true;
+        engineStatusLabel.ToolTipText =
+            "Reports whether the native MacrosEngine DLL loaded successfully for recording, playback, and controller polling.";
+        profileStatusLabel.ToolTipText =
+            "Shows the currently detected profile name based on the foreground app's process.";
+    }
+
     private void LoadData()
     {
-        // Load slots
-        var slots = _slotManager.LoadSlots();
-        slotList.LoadSlots(slots);
+        RefreshSlotList();
 
         // Load profiles and detect active
         var profiles = _profileManager.LoadProfiles();
@@ -178,6 +254,7 @@ public partial class MainForm : Form
         }
 
         // Actual shutdown
+        DeactivateHoldMode(silent: true);
         DisposeRecordingHook();
         DisposeAutoclickerTimer();
         _hotkeyManager.Dispose();
@@ -222,6 +299,7 @@ public partial class MainForm : Form
     {
         _isExiting = true;
 
+        DeactivateHoldMode(silent: true);
         DisposeRecordingHook();
         DisposeAutoclickerTimer();
         _hotkeyManager.Dispose();
@@ -328,14 +406,10 @@ public partial class MainForm : Form
                 HighlightButton(btnAutoclicker, true);
                 break;
             case MacroType.TurboHold:
-                _activeMacroType = null;
-                ResetAllButtons();
-                SetState(MacroState.Idle, "Turbo Hold not implemented yet");
+                ActivateTurboHold();
                 break;
             case MacroType.PureHold:
-                _activeMacroType = null;
-                ResetAllButtons();
-                SetState(MacroState.Idle, "Pure Hold not implemented yet");
+                ActivatePureHold();
                 break;
             case MacroType.Recorder:
                 _activeMacroType = type;
@@ -355,6 +429,12 @@ public partial class MainForm : Form
 
     private void DeactivateCurrentMacro()
     {
+        if (_activeMacroType == MacroType.TurboHold || _activeMacroType == MacroType.PureHold)
+        {
+            DeactivateHoldMode();
+            return;
+        }
+
         if (_activeMacroType == MacroType.Recorder)
         {
             FinalizeRecording();
@@ -379,6 +459,9 @@ public partial class MainForm : Form
                 return;
             case MacroType.Autoclicker:
                 ToggleAutoclicker();
+                return;
+            case MacroType.TurboHold:
+            case MacroType.PureHold:
                 return;
         }
 
@@ -527,6 +610,259 @@ public partial class MainForm : Form
         return $"Autoclicker ready: F12 toggles ({_settings.AutoclickerInterval} ms)";
     }
 
+    private void ActivateTurboHold()
+    {
+        if (!TryPromptTurboRepeatInterval(out int repeatMs))
+        {
+            _activeMacroType = null;
+            ResetAllButtons();
+            SetState(MacroState.Idle, "Turbo hold canceled");
+            return;
+        }
+
+        if (!TryConfigureHoldKey(
+                "Turbo Hold",
+                "Input key to turbo.",
+                out var key,
+                out var label))
+        {
+            _activeMacroType = null;
+            ResetAllButtons();
+            SetState(MacroState.Idle, "Turbo hold canceled");
+            return;
+        }
+
+        _turboRepeatMs = repeatMs;
+        ActivateHoldMode(MacroType.TurboHold, key, label);
+        ToggleConfiguredHoldMode();
+    }
+
+    private void ActivatePureHold()
+    {
+        if (!TryConfigureHoldKey(
+                "Pure Hold",
+                "Input key to hold down.",
+                out var key,
+                out var label))
+        {
+            _activeMacroType = null;
+            ResetAllButtons();
+            SetState(MacroState.Idle, "Pure hold canceled");
+            return;
+        }
+
+        ActivateHoldMode(MacroType.PureHold, key, label);
+        ToggleConfiguredHoldMode();
+    }
+
+    private void ActivateHoldMode(MacroType type, Keys key, string label)
+    {
+        DeactivateHoldMode(silent: true);
+
+        _activeMacroType = type;
+        _configuredHoldKey = key;
+        _configuredHoldKeyLabel = label;
+        _holdMacroEngaged = false;
+
+        _holdKeyBinding = new KeyboardToggleBinding(
+            key,
+            () =>
+            {
+                if (!IsHandleCreated || IsDisposed)
+                    return;
+
+                BeginInvoke(new Action(ToggleConfiguredHoldMode));
+            });
+
+        if (!_holdKeyBinding.Start())
+        {
+            _holdKeyBinding.Dispose();
+            _holdKeyBinding = null;
+            _activeMacroType = null;
+            _configuredHoldKey = Keys.None;
+            _configuredHoldKeyLabel = string.Empty;
+            SetState(MacroState.Idle, $"{GetModeDisplayName(type)} unavailable");
+            return;
+        }
+
+        HighlightButton(type == MacroType.TurboHold ? btnTurboHold : btnPureHold, true);
+        SetState(MacroState.Idle, $"{GetModeDisplayName(type)} ready: {label} (press again to toggle)");
+    }
+
+    private void ToggleConfiguredHoldMode()
+    {
+        if ((_activeMacroType != MacroType.TurboHold && _activeMacroType != MacroType.PureHold) ||
+            _configuredHoldKey == Keys.None)
+        {
+            return;
+        }
+
+        if (_holdMacroEngaged)
+        {
+            StopConfiguredHoldOutput();
+            SetState(
+                MacroState.Idle,
+                $"{GetModeDisplayName(_activeMacroType.Value)} OFF: {_configuredHoldKeyLabel}");
+            return;
+        }
+
+        StartConfiguredHoldOutput();
+        SetState(
+            MacroState.Playing,
+            $"{GetModeDisplayName(_activeMacroType.Value)} ON: {_configuredHoldKeyLabel}");
+    }
+
+    private void StartConfiguredHoldOutput()
+    {
+        if (_configuredHoldKey == Keys.None)
+            return;
+
+        _holdMacroEngaged = true;
+        WindowsInput.SendKeyDown(_configuredHoldKey);
+
+        if (_activeMacroType == MacroType.TurboHold)
+        {
+            _turboRepeatTimer ??= new System.Threading.Timer(
+                _ => WindowsInput.SendKeyPress(_configuredHoldKey),
+                null,
+                Timeout.Infinite,
+                Timeout.Infinite);
+
+            _turboRepeatTimer.Change(_turboRepeatMs, _turboRepeatMs);
+        }
+    }
+
+    private void StopConfiguredHoldOutput()
+    {
+        _turboRepeatTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+
+        if (_configuredHoldKey != Keys.None)
+            WindowsInput.SendKeyUp(_configuredHoldKey);
+
+        _holdMacroEngaged = false;
+    }
+
+    private void DeactivateHoldMode(bool silent = false)
+    {
+        if (_activeMacroType != MacroType.TurboHold &&
+            _activeMacroType != MacroType.PureHold &&
+            _holdKeyBinding == null &&
+            _configuredHoldKey == Keys.None)
+        {
+            return;
+        }
+
+        StopConfiguredHoldOutput();
+
+        _holdKeyBinding?.Dispose();
+        _holdKeyBinding = null;
+        _turboRepeatTimer?.Dispose();
+        _turboRepeatTimer = null;
+        _configuredHoldKey = Keys.None;
+        _configuredHoldKeyLabel = string.Empty;
+        _activeMacroType = null;
+
+        ResetAllButtons();
+
+        if (!silent)
+            SetState(MacroState.Idle, "Idle");
+    }
+
+    private bool TryPromptTurboRepeatInterval(out int repeatMs)
+    {
+        repeatMs = _turboRepeatMs;
+
+        while (true)
+        {
+            _hotkeysSuspended = true;
+            string? input;
+            try
+            {
+                input = ShowInputDialog(
+                    "Turbo Hold",
+                    $"Enter repeat interval in ms (10-10000, default {_turboRepeatMs}):",
+                    _turboRepeatMs.ToString());
+            }
+            finally
+            {
+                _hotkeysSuspended = false;
+            }
+
+            if (input == null)
+                return false;
+
+            if (string.IsNullOrWhiteSpace(input))
+            {
+                repeatMs = _turboRepeatMs;
+                return true;
+            }
+
+            if (int.TryParse(input.Trim(), out int parsed))
+            {
+                repeatMs = Math.Clamp(parsed, 10, 10000);
+                return true;
+            }
+
+            MessageBox.Show(
+                this,
+                "Enter a whole number between 10 and 10000.",
+                "Turbo Hold",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+    }
+
+    private bool TryConfigureHoldKey(string title, string prompt, out Keys key, out string label)
+    {
+        key = Keys.None;
+        label = string.Empty;
+
+        while (true)
+        {
+            _hotkeysSuspended = true;
+            bool selected;
+            try
+            {
+                selected = KeyCaptureDialog.TrySelectKey(this, title, prompt, out key);
+            }
+            finally
+            {
+                _hotkeysSuspended = false;
+            }
+
+            if (!selected)
+                return false;
+
+            key &= Keys.KeyCode;
+            if (key == Keys.None)
+                return false;
+
+            if (ReservedHoldKeys.Contains(key))
+            {
+                MessageBox.Show(
+                    this,
+                    $"{KeyCaptureDialog.FormatKey(key)} is reserved by the app. Choose a different key.",
+                    title,
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                continue;
+            }
+
+            label = KeyCaptureDialog.FormatKey(key);
+            return true;
+        }
+    }
+
+    private static string GetModeDisplayName(MacroType type)
+    {
+        return type switch
+        {
+            MacroType.TurboHold => "Turbo Hold",
+            MacroType.PureHold => "Pure Hold",
+            _ => type.ToString()
+        };
+    }
+
     private bool StartRecordingSession()
     {
         if (!NativeEngine.TryInit() || !NativeEngine.TryStartRecording())
@@ -586,14 +922,15 @@ public partial class MainForm : Form
         }
 
         slotName = string.IsNullOrWhiteSpace(slotName) ? defaultName : slotName.Trim();
-        if (!PersistRecordedEvents(slotName, out uint savedCount))
+        string normalizedSlotName = _slotManager.NormalizeSlotName(slotName);
+        if (!PersistRecordedEvents(normalizedSlotName, out uint savedCount))
         {
-            SetState(MacroState.Idle, $"Save failed: {slotName}");
+            SetState(MacroState.Idle, $"Save failed: {normalizedSlotName}");
             return;
         }
 
-        RefreshSlotList();
-        SetState(MacroState.Idle, $"Saved: {slotName} ({savedCount} events)");
+        RefreshSlotList(normalizedSlotName);
+        SetState(MacroState.Idle, $"Saved: {normalizedSlotName} ({savedCount} events)");
     }
 
     private bool PersistRecordedEvents(string slotName, out uint savedCount)
@@ -699,10 +1036,12 @@ public partial class MainForm : Form
     private void RenameSlot(MacroSlot slot)
     {
         string? newName = ShowInputDialog("Rename Slot", "New name:", slot.Name);
-        if (!string.IsNullOrWhiteSpace(newName) && newName != slot.Name)
+        string normalizedName = _slotManager.NormalizeSlotName(newName ?? string.Empty);
+        if (!string.IsNullOrWhiteSpace(normalizedName) &&
+            !normalizedName.Equals(slot.Name, StringComparison.OrdinalIgnoreCase))
         {
-            _slotManager.RenameSlot(slot.Name, newName);
-            RefreshSlotList();
+            _slotManager.RenameSlot(slot.Name, normalizedName);
+            RefreshSlotList(normalizedName);
         }
     }
 
@@ -722,10 +1061,11 @@ public partial class MainForm : Form
         }
     }
 
-    private void RefreshSlotList()
+    private void RefreshSlotList(string? preferredSlotName = null)
     {
         var slots = _slotManager.LoadSlots();
-        slotList.LoadSlots(slots);
+        string? selectedSlotName = preferredSlotName ?? slotList.SelectedSlot?.Name;
+        slotList.LoadSlots(slots, selectedSlotName);
     }
 
     // ================================================================

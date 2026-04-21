@@ -2,11 +2,33 @@ namespace MacrosApp.Controls;
 
 public class ControllerStatePanel : UserControl
 {
+    private enum HoverRegion
+    {
+        None,
+        Disconnected,
+        LeftStick,
+        RightStick,
+        LeftTrigger,
+        RightTrigger,
+        AButton,
+        BButton,
+        XButton,
+        YButton,
+        LeftBumper,
+        RightBumper,
+        BackButton,
+        StartButton
+    }
+
     private System.Windows.Forms.Timer? _refreshTimer;
     private ControllerState _state;
     private bool _connected;
     private int _deadzone = 7849;
     private int _triggerDeadzone = 30;
+    private ToolTip? _toolTip;
+    private string _baseToolTipText = string.Empty;
+    private string _activeToolTipText = string.Empty;
+    private HoverRegion _hoverRegion = HoverRegion.None;
 
     // Colors
     private static readonly Color BgColor = Color.FromArgb(30, 30, 30);
@@ -54,6 +76,8 @@ public class ControllerStatePanel : UserControl
                  ControlStyles.OptimizedDoubleBuffer, true);
         BackColor = BgColor;
         MinimumSize = new Size(320, 180);
+        MouseMove += ControllerStatePanel_MouseMove;
+        MouseLeave += (_, _) => RestoreBaseToolTip();
     }
 
     public void StartRefresh()
@@ -261,5 +285,133 @@ public class ControllerStatePanel : UserControl
         if (disposing)
             StopRefresh();
         base.Dispose(disposing);
+    }
+
+    public void ApplyToolTip(ToolTip toolTip, string text)
+    {
+        _toolTip = toolTip;
+        _baseToolTipText = text;
+        _activeToolTipText = text;
+        toolTip.SetToolTip(this, text);
+    }
+
+    private void ControllerStatePanel_MouseMove(object? sender, MouseEventArgs e)
+    {
+        if (_toolTip == null)
+            return;
+
+        HoverRegion region = HitTestRegion(e.Location);
+        if (region == _hoverRegion)
+            return;
+
+        _hoverRegion = region;
+        string text = region == HoverRegion.None ? _baseToolTipText : GetToolTipText(region);
+        if (text == _activeToolTipText)
+            return;
+
+        _activeToolTipText = text;
+        _toolTip.SetToolTip(this, text);
+    }
+
+    private void RestoreBaseToolTip()
+    {
+        if (_toolTip == null)
+            return;
+
+        _hoverRegion = HoverRegion.None;
+        if (_activeToolTipText == _baseToolTipText)
+            return;
+
+        _activeToolTipText = _baseToolTipText;
+        _toolTip.SetToolTip(this, _baseToolTipText);
+    }
+
+    private HoverRegion HitTestRegion(Point point)
+    {
+        if (!_connected)
+            return HoverRegion.Disconnected;
+
+        int w = ClientSize.Width;
+        int h = ClientSize.Height;
+        if (w <= 0 || h <= 0)
+            return HoverRegion.None;
+
+        int stickRadius = Math.Min(w / 6, h / 3);
+        int padding = 10;
+        int lx = padding + stickRadius;
+        int ly = h / 2;
+        int rx = w - padding - stickRadius;
+        int ry = h / 2;
+        int centerX = w / 2;
+        int triggerW = 30;
+        int triggerH = h - 40;
+        int triggerY = 20;
+        int btnSize = 14;
+        int btnRadius = btnSize / 2;
+        int btnCenterY = h / 2 + 15;
+        int bumperY = 8;
+
+        if (PointInCircle(point, lx, ly, stickRadius))
+            return HoverRegion.LeftStick;
+        if (PointInCircle(point, rx, ry, stickRadius))
+            return HoverRegion.RightStick;
+
+        if (new Rectangle(centerX - 50, triggerY, triggerW, triggerH).Contains(point))
+            return HoverRegion.LeftTrigger;
+        if (new Rectangle(centerX + 20, triggerY, triggerW, triggerH).Contains(point))
+            return HoverRegion.RightTrigger;
+
+        if (PointInCircle(point, centerX, btnCenterY + btnSize + 4, btnRadius))
+            return HoverRegion.AButton;
+        if (PointInCircle(point, centerX + btnSize + 4, btnCenterY, btnRadius))
+            return HoverRegion.BButton;
+        if (PointInCircle(point, centerX - btnSize - 4, btnCenterY, btnRadius))
+            return HoverRegion.XButton;
+        if (PointInCircle(point, centerX, btnCenterY - btnSize - 4, btnRadius))
+            return HoverRegion.YButton;
+
+        if (new Rectangle(centerX - 90, bumperY, 50, 14).Contains(point))
+            return HoverRegion.LeftBumper;
+        if (new Rectangle(centerX + 40, bumperY, 50, 14).Contains(point))
+            return HoverRegion.RightBumper;
+        if (new Rectangle(centerX - 40, h - 24, 30, 12).Contains(point))
+            return HoverRegion.BackButton;
+        if (new Rectangle(centerX + 10, h - 24, 30, 12).Contains(point))
+            return HoverRegion.StartButton;
+
+        return HoverRegion.None;
+    }
+
+    private string GetToolTipText(HoverRegion region)
+    {
+        return region switch
+        {
+            HoverRegion.Disconnected => "No XInput controller is currently connected or readable by the native engine.",
+            HoverRegion.LeftStick => $"Left stick input. The dot shows live X/Y position and the ring shows the thumb deadzone. Current raw: X={_state.LeftThumbX}, Y={_state.LeftThumbY}.",
+            HoverRegion.RightStick => $"Right stick input. The dot shows live X/Y position and the ring shows the thumb deadzone. Current raw: X={_state.RightThumbX}, Y={_state.RightThumbY}.",
+            HoverRegion.LeftTrigger => $"Left trigger input from 0 to 255. Current value: {_state.LeftTrigger}.",
+            HoverRegion.RightTrigger => $"Right trigger input from 0 to 255. Current value: {_state.RightTrigger}.",
+            HoverRegion.AButton => GetButtonText("A", "bottom face button", (_state.Buttons & XINPUT_GAMEPAD_A) != 0),
+            HoverRegion.BButton => GetButtonText("B", "right face button", (_state.Buttons & XINPUT_GAMEPAD_B) != 0),
+            HoverRegion.XButton => GetButtonText("X", "left face button", (_state.Buttons & XINPUT_GAMEPAD_X) != 0),
+            HoverRegion.YButton => GetButtonText("Y", "top face button", (_state.Buttons & XINPUT_GAMEPAD_Y) != 0),
+            HoverRegion.LeftBumper => GetButtonText("LB", "left bumper", (_state.Buttons & XINPUT_GAMEPAD_LEFT_SHOULDER) != 0),
+            HoverRegion.RightBumper => GetButtonText("RB", "right bumper", (_state.Buttons & XINPUT_GAMEPAD_RIGHT_SHOULDER) != 0),
+            HoverRegion.BackButton => GetButtonText("Back", "back/share button", (_state.Buttons & XINPUT_GAMEPAD_BACK) != 0),
+            HoverRegion.StartButton => GetButtonText("Start", "start/options button", (_state.Buttons & XINPUT_GAMEPAD_START) != 0),
+            _ => _baseToolTipText
+        };
+    }
+
+    private static string GetButtonText(string label, string role, bool pressed)
+    {
+        return $"{label} button ({role}). Current state: {(pressed ? "pressed" : "released")}.";
+    }
+
+    private static bool PointInCircle(Point point, int centerX, int centerY, int radius)
+    {
+        int dx = point.X - centerX;
+        int dy = point.Y - centerY;
+        return (dx * dx) + (dy * dy) <= radius * radius;
     }
 }

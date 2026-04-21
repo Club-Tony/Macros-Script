@@ -6,10 +6,14 @@
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
+    <PlatformTarget>x64</PlatformTarget>
+    <MacrosEngineDllPath Condition="Exists('..\..\MacrosEngine\build-x64\MacrosEngine.dll')">..\..\MacrosEngine\build-x64\MacrosEngine.dll</MacrosEngineDllPath>
+    <MacrosEngineDllPath Condition="'$(MacrosEngineDllPath)' == '' and Exists('..\..\MacrosEngine\build\MacrosEngine.dll')">..\..\MacrosEngine\build\MacrosEngine.dll</MacrosEngineDllPath>
+    <MacrosEngineDllPath Condition="'$(MacrosEngineDllPath)' == '' and Exists('..\..\MacrosEngine\build\libMacrosEngine.dll')">..\..\MacrosEngine\build\libMacrosEngine.dll</MacrosEngineDllPath>
   </PropertyGroup>
 
-  <Target Name="CopyMacrosEngineX64" AfterTargets="Build" Condition="Exists('..\..\MacrosEngine\build-x64\MacrosEngine.dll')">
-    <Copy SourceFiles="..\..\MacrosEngine\build-x64\MacrosEngine.dll"
+  <Target Name="CopyMacrosEngine" AfterTargets="Build" Condition="'$(MacrosEngineDllPath)' != ''">
+    <Copy SourceFiles="$(MacrosEngineDllPath)"
           DestinationFiles="$(OutDir)MacrosEngine.dll" />
   </Target>
 
