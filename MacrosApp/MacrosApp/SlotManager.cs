@@ -6,12 +6,14 @@ public class SlotManager
 {
     private readonly string _basePath;
     private readonly string _iniPath;
+    private readonly string _iniBackupPath;
     private readonly string _eventsDir;
 
     public SlotManager(string basePath)
     {
         _basePath = basePath;
         _iniPath = Path.Combine(_basePath, "macros.ini");
+        _iniBackupPath = Path.Combine(_basePath, "macros.ini.bak");
         _eventsDir = Path.Combine(_basePath, "macros_events");
 
         if (!Directory.Exists(_eventsDir))
@@ -143,6 +145,11 @@ public class SlotManager
         return Path.Combine(_eventsDir, $"{safeName}.txt");
     }
 
+    public string NormalizeSlotName(string name)
+    {
+        return SanitizeSlotName(name);
+    }
+
     /// <summary>
     /// Save event data for a slot.
     /// </summary>
@@ -236,7 +243,9 @@ public class SlotManager
                 });
         }
 
-        using var writer = new StreamWriter(_iniPath, false, System.Text.Encoding.UTF8);
+        CreateIniBackup();
+
+        using var writer = new StreamWriter(_iniPath, false, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
         for (int i = 0; i < ini.SectionOrder.Count; i++)
         {
             string sectionName = ini.SectionOrder[i];
@@ -251,6 +260,21 @@ public class SlotManager
 
             if (i < ini.SectionOrder.Count - 1)
                 writer.WriteLine();
+        }
+    }
+
+    private void CreateIniBackup()
+    {
+        if (!File.Exists(_iniPath))
+            return;
+
+        try
+        {
+            File.Copy(_iniPath, _iniBackupPath, overwrite: true);
+        }
+        catch
+        {
+            // Keep slot operations working even if backup creation fails.
         }
     }
 

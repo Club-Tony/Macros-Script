@@ -7,6 +7,10 @@ public class SlotListControl : UserControl
     private readonly ListBox _listBox;
     private readonly ContextMenuStrip _contextMenu;
     private List<MacroSlot> _slots = new();
+    private ToolTip? _toolTip;
+    private string _baseToolTipText = string.Empty;
+    private string _activeToolTipText = string.Empty;
+    private int _hoveredIndex = -1;
 
     public event EventHandler<MacroSlot>? SlotSelected;
     public event EventHandler<MacroSlot>? PlayRequested;
@@ -39,6 +43,8 @@ public class SlotListControl : UserControl
             if (SelectedSlot != null)
                 SlotSelected?.Invoke(this, SelectedSlot);
         };
+        _listBox.MouseMove += ListBox_MouseMove;
+        _listBox.MouseLeave += (_, _) => RestoreBaseToolTip();
         _listBox.DoubleClick += (_, _) =>
         {
             if (SelectedSlot != null)
@@ -73,14 +79,21 @@ public class SlotListControl : UserControl
         Controls.Add(_listBox);
     }
 
-    public void LoadSlots(List<MacroSlot> slots)
+    public void LoadSlots(List<MacroSlot> slots, string? selectedSlotName = null)
     {
+        string? selectionToRestore = string.IsNullOrWhiteSpace(selectedSlotName)
+            ? SelectedSlot?.Name
+            : selectedSlotName;
+
         _slots = slots;
         _listBox.Items.Clear();
         foreach (var slot in slots)
         {
             _listBox.Items.Add(slot.ToString());
         }
+
+        if (!SelectSlot(selectionToRestore))
+            _listBox.ClearSelected();
     }
 
     public void RefreshDisplay()
@@ -93,6 +106,77 @@ public class SlotListControl : UserControl
         }
         if (selected >= 0 && selected < _listBox.Items.Count)
             _listBox.SelectedIndex = selected;
+    }
+
+    public bool SelectSlot(string? slotName)
+    {
+        if (string.IsNullOrWhiteSpace(slotName))
+            return false;
+
+        int index = _slots.FindIndex(slot => slot.Name.Equals(slotName, StringComparison.OrdinalIgnoreCase));
+        if (index < 0)
+            return false;
+
+        _listBox.SelectedIndex = index;
+        return true;
+    }
+
+    public void ApplyToolTip(ToolTip toolTip, string text)
+    {
+        _toolTip = toolTip;
+        _baseToolTipText = text;
+        _activeToolTipText = text;
+        toolTip.SetToolTip(this, text);
+        toolTip.SetToolTip(_listBox, text);
+    }
+
+    private void ListBox_MouseMove(object? sender, MouseEventArgs e)
+    {
+        if (_toolTip == null)
+            return;
+
+        int index = _listBox.IndexFromPoint(e.Location);
+        if (index < 0 || index >= _slots.Count)
+        {
+            RestoreBaseToolTip();
+            return;
+        }
+
+        if (_hoveredIndex == index)
+            return;
+
+        _hoveredIndex = index;
+        string text = BuildSlotToolTip(_slots[index]);
+        if (text == _activeToolTipText)
+            return;
+
+        _activeToolTipText = text;
+        _toolTip.SetToolTip(_listBox, text);
+    }
+
+    private void RestoreBaseToolTip()
+    {
+        if (_toolTip == null)
+            return;
+
+        _hoveredIndex = -1;
+        if (_activeToolTipText == _baseToolTipText)
+            return;
+
+        _activeToolTipText = _baseToolTipText;
+        _toolTip.SetToolTip(_listBox, _baseToolTipText);
+    }
+
+    private static string BuildSlotToolTip(MacroSlot slot)
+    {
+        string durationText = slot.Duration > TimeSpan.Zero
+            ? $"{slot.Duration.TotalSeconds:F1}s"
+            : "unknown duration";
+        string recordedText = string.IsNullOrWhiteSpace(slot.Recorded)
+            ? "Recorded date unknown."
+            : $"Recorded: {slot.Recorded}.";
+
+        return $"{slot.Name}\n{slot.EventCount} events, {durationText}.\n{recordedText}\nDouble-click to play. Right-click for rename, export, or delete.";
     }
 
     private void ListBox_DrawItem(object? sender, DrawItemEventArgs e)
