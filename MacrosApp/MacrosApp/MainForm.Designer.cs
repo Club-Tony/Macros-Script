@@ -77,8 +77,8 @@ partial class MainForm
         // --- Form ---
         this.SuspendLayout();
         this.AutoScaleMode = AutoScaleMode.Dpi;
-        this.ClientSize = new Size(520, 700);
-        this.MinimumSize = new Size(480, 600);
+        this.ClientSize = new Size(840, 700);
+        this.MinimumSize = new Size(680, 600);
         this.Text = "Macros";
         this.BackColor = bgDark;
         this.ForeColor = fgMain;
@@ -187,7 +187,7 @@ partial class MainForm
             Panel1MinSize = 100,
             Panel2MinSize = 100
         };
-        bottomSplit.SplitterDistance = 230;
+        bottomSplit.SplitterDistance = 300;
 
         // --- Settings Panel (left) ---
         settingsPanel = new Panel
