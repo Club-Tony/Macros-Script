@@ -1,4 +1,5 @@
 using MacrosApp.Models;
+using System.Threading;
 
 namespace MacrosApp;
 
@@ -8,6 +9,8 @@ public partial class MainForm : Form
     private SlotManager _slotManager = null!;
     private ProfileManager _profileManager = null!;
     private MacroSettings _settings = new();
+    private System.Threading.Timer? _autoclickTimer;
+    private bool _autoclickerRunning;
     private RecordingInputHook? _recordingInputHook;
     private DateTime _recordingIgnoreUntilUtc = DateTime.MinValue;
     private bool _hotkeysSuspended;
@@ -97,7 +100,11 @@ public partial class MainForm : Form
         slotList.ExportRequested += (_, slot) => ExportSlot(slot);
 
         // Settings changes
-        nudInterval.ValueChanged += (_, _) => _settings.AutoclickerInterval = (int)nudInterval.Value;
+        nudInterval.ValueChanged += (_, _) =>
+        {
+            _settings.AutoclickerInterval = (int)nudInterval.Value;
+            RefreshAutoclickerInterval();
+        };
         cmbSendMode.SelectedIndexChanged += (_, _) =>
         {
             if (Enum.TryParse<SendModeType>(cmbSendMode.SelectedItem?.ToString(), out var mode))
@@ -172,6 +179,7 @@ public partial class MainForm : Form
 
         // Actual shutdown
         DisposeRecordingHook();
+        DisposeAutoclickerTimer();
         _hotkeyManager.Dispose();
         controllerState.StopRefresh();
         NativeEngine.TryShutdown();
@@ -215,6 +223,7 @@ public partial class MainForm : Form
         _isExiting = true;
 
         DisposeRecordingHook();
+        DisposeAutoclickerTimer();
         _hotkeyManager.Dispose();
         controllerState.StopRefresh();
         NativeEngine.TryShutdown();
@@ -272,7 +281,7 @@ public partial class MainForm : Form
                 ToggleMacro(MacroType.Recorder);
                 break;
             case HotkeyManager.HOTKEY_PLAYBACK:
-                TogglePlayback();
+                HandlePlaybackHotkey();
                 break;
             case HotkeyManager.HOTKEY_SHOW_HIDE:
                 if (this.Visible)
@@ -302,29 +311,34 @@ public partial class MainForm : Form
         // Deactivate previous if different
         if (_activeMacroType != null)
             DeactivateCurrentMacro();
+        else if (NativeEngine.TryIsPlaying())
+            NativeEngine.TryStopPlayback();
 
         // Activate new
-        _activeMacroType = type;
-
         switch (type)
         {
             case MacroType.SlashMacro:
-                SetState(MacroState.Playing, "Slash Macro active");
+                _activeMacroType = type;
+                SetState(MacroState.Idle, "Slash Macro ready: F12 => left click");
                 HighlightButton(btnSlashMacro, true);
                 break;
             case MacroType.Autoclicker:
-                SetState(MacroState.Playing, "Autoclicker active");
+                _activeMacroType = type;
+                SetState(MacroState.Idle, GetAutoclickerReadyText());
                 HighlightButton(btnAutoclicker, true);
                 break;
             case MacroType.TurboHold:
-                SetState(MacroState.Playing, "Turbo Hold active");
-                HighlightButton(btnTurboHold, true);
+                _activeMacroType = null;
+                ResetAllButtons();
+                SetState(MacroState.Idle, "Turbo Hold not implemented yet");
                 break;
             case MacroType.PureHold:
-                SetState(MacroState.Playing, "Pure Hold active");
-                HighlightButton(btnPureHold, true);
+                _activeMacroType = null;
+                ResetAllButtons();
+                SetState(MacroState.Idle, "Pure Hold not implemented yet");
                 break;
             case MacroType.Recorder:
+                _activeMacroType = type;
                 if (StartRecordingSession())
                 {
                     SetState(MacroState.Recording, "Recording...");
@@ -347,9 +361,28 @@ public partial class MainForm : Form
             return;
         }
 
+        StopAutoclicker(keepReady: false);
         _activeMacroType = null;
         ResetAllButtons();
         SetState(MacroState.Idle, "Idle");
+    }
+
+    private void HandlePlaybackHotkey()
+    {
+        switch (_activeMacroType)
+        {
+            case MacroType.SlashMacro:
+                if (WindowsInput.SendLeftClick())
+                    SetState(MacroState.Idle, "Slash Macro ready: F12 => left click");
+                else
+                    SetState(MacroState.Idle, "Slash Macro click failed");
+                return;
+            case MacroType.Autoclicker:
+                ToggleAutoclicker();
+                return;
+        }
+
+        TogglePlayback();
     }
 
     private void TogglePlayback()
@@ -370,6 +403,19 @@ public partial class MainForm : Form
 
     private void PlaySlot(MacroSlot slot)
     {
+        if (_activeMacroType == MacroType.Recorder)
+        {
+            SetState(MacroState.Recording, "Finish recording before playback");
+            return;
+        }
+
+        if (_activeMacroType != null)
+        {
+            StopAutoclicker(keepReady: false);
+            _activeMacroType = null;
+            ResetAllButtons();
+        }
+
         if (!NativeEngine.TryInit())
         {
             SetState(MacroState.Idle, "Engine unavailable");
@@ -419,6 +465,66 @@ public partial class MainForm : Form
             NativeEngine.TryStopPlayback();
             SetState(MacroState.Idle, "Idle");
         }
+    }
+
+    private void ToggleAutoclicker()
+    {
+        if (_activeMacroType != MacroType.Autoclicker)
+            return;
+
+        if (_autoclickerRunning)
+        {
+            StopAutoclicker(keepReady: true);
+            return;
+        }
+
+        EnsureAutoclickerTimer();
+        _autoclickerRunning = true;
+        _autoclickTimer!.Change(_settings.AutoclickerInterval, _settings.AutoclickerInterval);
+        SetState(MacroState.Playing, $"Autoclicker running ({_settings.AutoclickerInterval} ms)");
+    }
+
+    private void RefreshAutoclickerInterval()
+    {
+        if (_autoclickerRunning)
+        {
+            _autoclickTimer?.Change(_settings.AutoclickerInterval, _settings.AutoclickerInterval);
+            SetState(MacroState.Playing, $"Autoclicker running ({_settings.AutoclickerInterval} ms)");
+            return;
+        }
+
+        if (_activeMacroType == MacroType.Autoclicker)
+            SetState(MacroState.Idle, GetAutoclickerReadyText());
+    }
+
+    private void EnsureAutoclickerTimer()
+    {
+        _autoclickTimer ??= new System.Threading.Timer(
+            _ => WindowsInput.SendLeftClick(),
+            null,
+            Timeout.Infinite,
+            Timeout.Infinite);
+    }
+
+    private void StopAutoclicker(bool keepReady)
+    {
+        _autoclickerRunning = false;
+        _autoclickTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+
+        if (keepReady && _activeMacroType == MacroType.Autoclicker)
+            SetState(MacroState.Idle, GetAutoclickerReadyText());
+    }
+
+    private void DisposeAutoclickerTimer()
+    {
+        StopAutoclicker(keepReady: false);
+        _autoclickTimer?.Dispose();
+        _autoclickTimer = null;
+    }
+
+    private string GetAutoclickerReadyText()
+    {
+        return $"Autoclicker ready: F12 toggles ({_settings.AutoclickerInterval} ms)";
     }
 
     private bool StartRecordingSession()
