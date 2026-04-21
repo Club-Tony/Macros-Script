@@ -58,7 +58,7 @@ DetectActiveProfile()
             continue
         if (fgProcess = procName || fgProcess = "" && false)  ; exact match only
         {
-            ProfileApply(section, iniPath)
+            ProfileApply(section, iniPath, false)
             if (debugEnabled)
                 ShowMacroToggledTip("DEBUG: Profile matched '" section "' for " fgProcess, 2000, false)
             return
@@ -66,13 +66,13 @@ DetectActiveProfile()
     }
 
     ; No match -- apply Default
-    ProfileApply("Default", iniPath)
+    ProfileApply("Default", iniPath, false)
     if (fgProcess != "" && debugEnabled)
         ShowMacroToggledTip("No game profile matched -- using Default", 2000, false)
 }
 
 ; Apply a specific profile by name, reading from profiles.ini.
-ProfileApply(profileName, iniPath := "")
+ProfileApply(profileName, iniPath := "", showTip := true)
 {
     global activeProfile, activeProfileName, sendMode, vJoyDeviceId, debugEnabled
     if (iniPath = "")
@@ -96,7 +96,8 @@ ProfileApply(profileName, iniPath := "")
     ; Apply vJoyDeviceId if vJoy is loaded
     vJoyDeviceId := vjId + 0
 
-    ShowMacroToggledTip("Profile loaded: " profileName " (Send" sm ")", 2000, false)
+    if (showTip)
+        ShowMacroToggledTip("Profile loaded: " profileName " (Send" sm ")", 2000, false)
 }
 
 ; Apply default settings without reading .ini (fallback).

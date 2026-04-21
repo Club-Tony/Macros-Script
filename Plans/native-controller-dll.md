@@ -1,131 +1,175 @@
-# Macros-Script — C# App + Native C/C++ Engine DLL
+# Macros-Script - C# App + Native C Engine DLL
 
-**Status:** Planned
+**Status:** In Progress
 **Created:** 2026-03-23
-**Goal:** Rebuild Macros-Script as a two-layer architecture: C# UI app + native C/C++ engine DLL — replacing AHK entirely
+**Goal:** Finish migrating Macros-Script into a two-layer architecture: a C# desktop app for UX plus a native C engine DLL for timing-sensitive input and controller work, while preserving compatibility with the existing AHK-era data files during the transition.
+
+## Current Status Snapshot
+
+As of 2026-04-18, this repo is already beyond the proposal stage.
+
+- `MacrosEngine/` exists as a native DLL plus smoke-test executable.
+- `MacrosApp/` exists as a WinForms shell with tray behavior, global hotkeys, slot/profile loading, controller visualization, and P/Invoke bindings.
+- The architecture choice is effectively validated; the remaining work is feature parity, end-to-end integration, controller playback, and packaging.
+
+## Verification
+
+Verified on 2026-04-18:
+
+- `cmake -S MacrosEngine -B MacrosEngine/build` succeeded
+- `cmake --build MacrosEngine/build` succeeded
+- `MacrosEngine/build/test_engine.exe` passed `48/48`
+- `dotnet build MacrosApp/MacrosApp/MacrosApp.csproj` could not run on this machine because no .NET SDK is installed
 
 ## Problem / Rationale
 
 ### Engine Problems (AHK as hardware interface)
-- `DllCall()` has overhead per invocation — at 50Hz polling that adds up
-- **Timer precision** — AHK's `SetTimer` resolution is ~15ms, making 20ms controller polling unreliable
-- **No threading** — AHK is single-threaded; polling blocks hotkey responsiveness
-- **Deadzone/normalization math** in AHK is awkward — no native floating-point or vector types
-- **Event playback timing** drifts because AHK's `Sleep` is imprecise at small intervals
+
+- `DllCall()` has overhead per invocation, and repeated controller polling makes that cost matter.
+- AHK timer precision is limited enough that frequent polling and short playback delays become unreliable.
+- AHK is single-threaded, so controller polling and playback work compete with hotkey responsiveness.
+- Deadzone and normalization math are much cleaner in native code than in AHK.
+- Playback timing drifts because short `Sleep` intervals are imprecise.
 
 ### UI Problems (AHK as user interface)
-- AHK GUIs are functional but crude — no modern controls, no data binding, no visual polish
-- Menu system is a custom overlay (`MacroGui.ahk`), not a real UI framework
-- No visual feedback for controller state (which stick, which buttons, deadzones)
-- Tray icon management is manual bitmap swapping
-- Settings/configuration is all ini-file editing or hotkey-driven — not discoverable for new users
-- **The goal is "extremely simple to use and user friendly"** — AHK can't deliver that
+
+- AHK GUIs are functional but crude, with limited controls and poor discoverability.
+- The current menu system is a custom overlay (`MacroGui.ahk`), not a real desktop UI.
+- The current UX does not expose controller state visually.
+- Tray icon management is manual and stateful in AHK.
+- Settings and profiles rely on ini editing or memorized hotkeys.
+- The goal is "extremely simple to use and user friendly," and AHK is not a good long-term UI layer for that.
 
 ## Architecture
 
-```
-+----------------------------------+     +------------------------+
-|   C# WPF/WinForms App           |     |   Native Engine DLL    |
-|                                  |     |   (C/C++)              |
-| - Modern Windows UI              |     |                        |
-| - Global hotkeys (RegisterHotKey)|<--->| - XInput polling       |
-| - System tray icon               |     | - vJoy output          |
-| - Slot manager (visual)          |     | - Event recording      |
-| - Profile manager (visual)       |     | - Event playback       |
-| - Live controller state display  |     | - Timing engine        |
-| - Settings panel                 |     | - Deadzone math        |
-| - Recording visualizer           |     | - SendInput dispatch   |
-+----------------------------------+     +------------------------+
+```text
++-------------------------------+     +---------------------------+
+| C# WinForms App               |     | Native C Engine DLL       |
+|                               |     |                           |
+| - Main window                 |<--->| - XInput polling          |
+| - Global hotkeys              |     | - High-resolution timing  |
+| - Tray icon                   |     | - Event recording buffer  |
+| - Slot/profile managers       |     | - Event playback          |
+| - Controller visualization    |     | - File format I/O         |
+| - Settings and UX             |     | - Future vJoy output      |
++-------------------------------+     +---------------------------+
 ```
 
-The C# app handles all user interaction. The native DLL handles all timing-critical hardware work. They communicate via P/Invoke (C# calling DLL exports).
+Current repo layout:
+
+- `MacrosEngine/` - native C DLL, timing helpers, XInput polling, event recorder/player, file I/O, smoke tests
+- `MacrosApp/MacrosApp/` - WinForms shell, tray icon, hotkeys, slot/profile managers, controller state panel, native bindings
+- `Macros.ahk` and `Macros_v2.ahk` - existing working implementations that remain the behavior baseline during migration
 
 ## Why This Over Keeping AHK
 
 | Concern | AHK Shell | C# App |
 |---------|-----------|--------|
-| Global hotkeys | Built-in (`#If` contexts) | `RegisterHotKey` Win32 API — same capability |
-| Tray icon | Manual bitmap swap | `NotifyIcon` — built-in, supports balloons/tooltips |
-| GUI | Custom overlay, limited controls | Full WinForms/WPF — buttons, sliders, lists, tabs |
-| Controller visualization | Not possible | Draw stick positions, button highlights, deadzone rings |
-| Slot management | Tray menu + ini editing | Visual list with rename, reorder, delete, preview |
-| Profile management | Hotkey cycle + ini editing | Dropdown with per-game settings panel |
-| Discoverability | Must know hotkeys to start | Visual menu — click what you want |
-| Distribution | Requires AHK runtime installed | Single exe (self-contained publish) |
+| Global hotkeys | Built-in via `#If` contexts | `RegisterHotKey` Win32 API |
+| Tray icon | Manual bitmap swapping | `NotifyIcon` support |
+| GUI | Custom overlay and limited controls | Real desktop controls and layouts |
+| Controller visualization | Effectively absent | Native drawing and live state panel |
+| Slot management | Tray menu plus ini editing | Visual list with rename, delete, export |
+| Profile management | Hotkey and ini driven | Detectable and editable in UI |
+| Discoverability | Requires memorized hotkeys | Clickable UI with visible state |
+| Distribution | Requires AHK runtime | Can become a self-contained app |
 
-## Scope
+## Implementation Status
 
-### Phase 1 — Native Engine DLL (C/C++)
-- [ ] DLL project setup (C, Win32, static-linked, no CRT dependency)
-- [ ] `Engine_Init()` / `Engine_Shutdown()` exports
-- [ ] Threaded XInput polling at configurable rate (default 5ms, 200Hz)
-- [ ] `QueryPerformanceCounter`-based high-resolution timing
-- [ ] Deadzone normalization (configurable per-stick, per-trigger)
-- [ ] Button state change detection + combo detection (L1+L2+R1+R2+button)
-- [ ] `Engine_GetControllerState()` for UI to read current state
-- [ ] Event recording (keyboard, mouse, controller — timestamped)
-- [ ] Event playback with microsecond timing reconstruction
-- [ ] vJoy output for controller playback (graceful fallback if not installed)
-- [ ] `SendInput` dispatch for keyboard/mouse playback
-- [ ] Read/write existing pipe-delimited event format (backward compatible with `.txt` files)
+### Phase 1 - Native Engine DLL
 
-### Phase 2 — C# App (Core)
-- [ ] C# WinForms or WPF project setup
-- [ ] P/Invoke bindings to engine DLL
-- [ ] Global hotkey registration (`RegisterHotKey`)
-- [ ] System tray icon with context menu
-- [ ] Main window with macro type selection (Slash, Autoclicker, Turbo, Hold, Recorder)
-- [ ] Basic record/play/stop controls
-- [ ] Status indicator (idle / recording / playing / paused)
+- [x] DLL project setup (`MacrosEngine/CMakeLists.txt`)
+- [x] `Engine_Init()` / `Engine_Shutdown()` exports
+- [x] Threaded XInput polling
+- [x] `QueryPerformanceCounter`-based timing helpers
+- [x] Configurable deadzone normalization for sticks and triggers
+- [x] `Engine_GetControllerState()` for UI polling
+- [x] Keyboard and mouse recording API with timestamped buffering
+- [x] High-resolution playback loop
+- [x] `SendInput` dispatch for keyboard and mouse playback
+- [x] Read/write compatibility for the existing pipe-delimited event format
+- [x] Native smoke-test executable covering lifecycle, recording, file I/O, polling, playback, and shutdown
+- [ ] Button state change detection and combo detection (`L1+L2+R1+R2+button`)
+- [ ] Controller-event recording inside the engine
+- [ ] vJoy output for controller playback
+- [ ] Playback-thread hardening before release; current code still has a `TerminateThread()` timeout fallback
 
-### Phase 3 — C# App (Rich UI)
-- [ ] Slot manager — visual list with names, durations, loop counts
-- [ ] Profile manager — per-game settings with auto-detection
-- [ ] Live controller state display (stick positions, button highlights)
-- [ ] Deadzone visualization (rings showing active deadzone)
-- [ ] Settings panel (intervals, SendMode, controller config)
-- [ ] Recording preview/timeline visualization
-- [ ] Sequence builder (chain multiple slots)
+### Phase 2 - C# App (Core)
 
-### Phase 4 — Distribution & Migration
-- [ ] Self-contained single-exe publish
-- [ ] Import existing `macros.ini` + `macros_events/*.txt` + `profiles.ini`
-- [ ] Data file compatibility (reads existing AHK-era files)
-- [ ] No installer needed — single exe + DLL (or embed DLL as resource)
+- [x] WinForms project setup
+- [x] P/Invoke bindings to the native DLL
+- [x] Global hotkey registration
+- [x] System tray shell
+- [x] Main window with macro type selection
+- [x] Status indicator for idle, recording, playing, and paused states
+- [ ] End-to-end record/play/stop wired through the engine
+- [ ] Persist newly recorded events back into `macros.ini` and `macros_events/*.txt`
+- [ ] Load a selected slot's event file into native playback
+- [ ] Replace placeholder macro-mode toggles with actual parity behavior
+
+### Phase 3 - C# App (Rich UI)
+
+- [x] Slot manager foundation (load, delete, rename, export)
+- [x] Profile manager foundation (load profiles, detect active profile by process)
+- [x] Live controller state display
+- [x] Deadzone visualization
+- [ ] Rich settings and profile editing UI
+- [ ] Recording preview or timeline visualization
+- [ ] Sequence builder
+- [ ] Tray-menu parity with the current AHK workflow
+
+### Phase 4 - Distribution and Migration
+
+- [x] Data file compatibility is partially proven by current slot/profile readers and native event file I/O
+- [ ] Self-contained publish flow for the WinForms app
+- [ ] Local .NET build toolchain setup and verification
+- [ ] First-run import or migration UX for `macros.ini`, `macros_events/*.txt`, and `profiles.ini`
+- [ ] No-installer packaging story for the app plus DLL
+
+## Recommended Next Milestone
+
+Target the first usable non-AHK MVP instead of adding more architecture work:
+
+1. Load an existing slot's `.txt` file into native playback and make `PlaySlot()` real.
+2. Capture managed keyboard and mouse input during record mode and feed it into the engine recorder.
+3. Save recorded events back through the native file writer and update `macros.ini`.
+4. Keep controller visualization read-only for this milestone; defer vJoy and controller recording until keyboard/mouse parity is stable.
+
+That yields a concrete MVP: launch the WinForms app, view existing slots, record a keyboard/mouse macro, save it, and replay it without running AHK.
 
 ## Key Constraints
 
-- **Backward compatible data** — must read existing `.txt` event files, `macros.ini`, `profiles.ini`
-- **No runtime dependencies on target** — self-contained C# publish + static-linked DLL
-- **vJoy is optional** — graceful degradation if not installed
-- **Original AHK version stays untouched** — this is a new parallel build
-- **Must be simpler to use than the AHK version** — if a user can't figure it out without reading docs, the UI has failed
+- Backward-compatible data remains mandatory: `.txt` event files, `macros.ini`, and `profiles.ini` must continue to work.
+- The original AHK implementation stays untouched during the migration.
+- vJoy remains optional and must degrade gracefully when absent.
+- The final UX has to be simpler to use than the AHK version, not just technically cleaner.
 
 ## UX Design Principles
 
-- **Zero-config start** — launch, pick a macro type, press a button. No hotkey memorization required
-- **Hotkeys are shortcuts, not requirements** — everything accessible via the UI; power users can still use keyboard
-- **Visual feedback** — always show what's happening (recording state, controller input, playback progress)
-- **Progressive disclosure** — simple view by default, advanced settings available but not in the way
+- Zero-config start: launch the app, pick a macro type, press a button.
+- Hotkeys are shortcuts, not requirements.
+- Visual feedback should always show recording state, playback state, and controller state.
+- Progressive disclosure should keep common actions obvious while hiding advanced settings until needed.
 
 ## Risks
 
-- **Build toolchain** — need MSVC or MinGW for the DLL + .NET SDK for the C# app
-- **Two languages** — C/C++ for the DLL and C# for the app is more complexity than a single-language solution
-- **DLL crashes** — native crashes can take down the C# process; need defensive error handling and crash recovery
-- **vJoy driver compatibility** — vJoy versions may have different DLL interfaces
-- **Learning curve** — WPF/WinForms if not already familiar (WinForms is simpler to start with)
+- The local .NET SDK is currently missing on this machine, so app-side build and test work is blocked until installed.
+- Two languages means more maintenance and integration complexity than a single-language app.
+- Native crashes can still take down the C# process.
+- Controller playback still depends on vJoy integration that does not exist yet.
+- The current playback thread shutdown strategy is acceptable for prototyping, not for release.
 
 ## Alternative Considered: Pure C#
 
-Could skip the native DLL entirely and do everything in C#:
-- XInput via `SharpDX.XInput` or direct P/Invoke to `xinput1_4.dll`
-- vJoy via P/Invoke to `vJoyInterface.dll`
-- High-resolution timing via `Stopwatch` (wraps `QueryPerformanceCounter`)
-- Dedicated `Task`/`Thread` for polling
+A pure C# implementation remains viable:
 
-This is simpler (one language) but gives up the guaranteed sub-millisecond timing precision of native code. For most users this would be fine — the .NET `Stopwatch` is accurate to ~1 microsecond. Worth considering if the two-language build complexity is a blocker.
+- XInput via direct P/Invoke
+- High-resolution timing via `Stopwatch`
+- Dedicated polling and playback threads in managed code
+- vJoy via P/Invoke to the driver DLL
+
+That would simplify the stack, but the current repo already has a working native prototype. Revisit the pure-C# option only if the native/controller work stalls or the two-language maintenance cost becomes the dominant problem.
 
 ## When
 
-Medium priority. The current AHK version works. This is a UX and precision upgrade. Good candidate for incremental implementation — Phase 1 (DLL) and Phase 2 (basic C# shell) together form a usable MVP.
+Medium priority. The current AHK version still works, and the prototype architecture now exists. The best path is incremental implementation: finish keyboard/mouse MVP parity in the WinForms app first, then add controller playback and packaging.
