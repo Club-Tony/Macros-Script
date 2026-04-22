@@ -11,6 +11,9 @@ As of 2026-04-21, this repo is beyond the proposal stage and already has a worki
 - `MacrosEngine/` exists as a native DLL plus smoke-test executable.
 - `MacrosApp/` exists as a WinForms shell with tray behavior, global hotkeys, slot/profile loading, controller visualization, recording hooks, native playback, and save-to-disk flow.
 - Existing `macros.ini` and `macros_events/*.txt` data are being read by the C# app already.
+- Slot playback now reconciles back to `Idle` when native playback finishes on its own, and the repo-side smoke harness covers record, save, replay, and idle cleanup.
+- Direct app-emitted macro output now honors `SendMode` for `Input` and `Event`; `Play` falls back to `Input` on modern Windows, while recorded slot playback still uses the native engine path.
+- The controller viewer now treats no-controller startup as a quiet waiting state and switches between waiting, connected, and unavailable states without treating "no controller turned on" as an error.
 - The architecture choice is validated. The remaining work is MVP verification, app-behavior polish, controller playback, and packaging.
 
 ## Verification
@@ -21,7 +24,7 @@ Verified on 2026-04-21:
 - `cmake --build MacrosEngine/build` succeeded
 - `MacrosEngine/build/test_engine.exe` built successfully
 - `dotnet build MacrosApp/MacrosApp/MacrosApp.csproj` succeeded
-- `dotnet run --no-build --project MacrosApp/tools/MacrosApp.Smoke/MacrosApp.Smoke.csproj` succeeded
+- `dotnet run --project MacrosApp/tools/MacrosApp.Smoke/MacrosApp.Smoke.csproj` succeeded
 - `MacrosApp/tools/Validate-Tooltips.ps1` succeeded in deterministic source-validation mode
 
 ## Problem / Rationale
