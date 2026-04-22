@@ -183,9 +183,9 @@ public partial class MainForm : Form
         _hoverHelp.SetToolTip(nudInterval,
             "Sets how quickly the autoclicker repeats left clicks while it is running.");
         _hoverHelp.SetToolTip(lblSendMode,
-            "Selected send mode for macro behavior. This is tracked in the UI, but not all playback paths honor it yet.");
+            "Selected send mode for direct macro output like slash, autoclick, and hold/turbo. Play falls back to Input on modern Windows, and recorded slot playback still uses the native engine.");
         _hoverHelp.SetToolTip(cmbSendMode,
-            "Choose the current send mode value. Profiles can also set this automatically.");
+            "Choose how direct key and mouse output is emitted. Profiles can also set this automatically; Input and Event are honored, while Play currently uses Input.");
         _hoverHelp.SetToolTip(lblLoopCount,
             "How many times a selected recording should replay. 0 means loop until you stop it.");
         _hoverHelp.SetToolTip(nudLoopCount,
@@ -470,7 +470,7 @@ public partial class MainForm : Form
         switch (_activeMacroType)
         {
             case MacroType.SlashMacro:
-                if (WindowsInput.SendLeftClick())
+                if (WindowsInput.SendLeftClick(_settings.SendMode))
                     SetState(MacroState.Idle, "Slash Macro ready: F12 => left click");
                 else
                     SetState(MacroState.Idle, "Slash Macro click failed");
@@ -607,7 +607,7 @@ public partial class MainForm : Form
     private void EnsureAutoclickerTimer()
     {
         _autoclickTimer ??= new System.Threading.Timer(
-            _ => WindowsInput.SendLeftClick(),
+            _ => WindowsInput.SendLeftClick(_settings.SendMode),
             null,
             Timeout.Infinite,
             Timeout.Infinite);
@@ -742,12 +742,12 @@ public partial class MainForm : Form
             return;
 
         _holdMacroEngaged = true;
-        WindowsInput.SendKeyDown(_configuredHoldKey);
+        WindowsInput.SendKeyDown(_configuredHoldKey, _settings.SendMode);
 
         if (_activeMacroType == MacroType.TurboHold)
         {
             _turboRepeatTimer ??= new System.Threading.Timer(
-                _ => WindowsInput.SendKeyPress(_configuredHoldKey),
+                _ => WindowsInput.SendKeyPress(_configuredHoldKey, _settings.SendMode),
                 null,
                 Timeout.Infinite,
                 Timeout.Infinite);
@@ -761,7 +761,7 @@ public partial class MainForm : Form
         _turboRepeatTimer?.Change(Timeout.Infinite, Timeout.Infinite);
 
         if (_configuredHoldKey != Keys.None)
-            WindowsInput.SendKeyUp(_configuredHoldKey);
+            WindowsInput.SendKeyUp(_configuredHoldKey, _settings.SendMode);
 
         _holdMacroEngaged = false;
     }
