@@ -135,7 +135,7 @@ Target MVP verification and app-behavior polish instead of more architecture wor
 
 1. Run the built WinForms app through the real user path: select an existing slot, play it, stop it, record a new macro, save it, and replay it.
 2. Keep the new smoke harness passing while fixing app-state gaps found during that path, especially playback lifecycle cleanup when native playback ends on its own.
-3. Exercise no-controller startup plus attach/detach behavior in the UI so the app stays quiet when no pad is present and recovers cleanly when one appears.
+3. Manually verify the controller viewer with a real device attach/detach pass now that the UI waits quietly when no pad is present and switches back to live polling when one appears.
 4. Keep controller visualization read-only for this milestone; defer vJoy and controller recording until keyboard/mouse parity is stable.
 
 That yields a concrete MVP: launch the WinForms app, view existing slots, record a keyboard/mouse macro, save it, replay it, and return cleanly to idle without running AHK.
