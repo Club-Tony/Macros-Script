@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <MacrosEngineDllPath Condition="Exists('..\..\..\MacrosEngine\build-x64\MacrosEngine.dll')">..\..\..\MacrosEngine\build-x64\MacrosEngine.dll</MacrosEngineDllPath>
+    <MacrosEngineDllPath Condition="'$(MacrosEngineDllPath)' == '' and Exists('..\..\..\MacrosEngine\build\MacrosEngine.dll')">..\..\..\MacrosEngine\build\MacrosEngine.dll</MacrosEngineDllPath>
+    <MacrosEngineDllPath Condition="'$(MacrosEngineDllPath)' == '' and Exists('..\..\..\MacrosEngine\build\libMacrosEngine.dll')">..\..\..\MacrosEngine\build\libMacrosEngine.dll</MacrosEngineDllPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\MacrosApp\MacrosApp.csproj" />
+  </ItemGroup>
+
+  <Target Name="CopyMacrosEngine" AfterTargets="Build" Condition="'$(MacrosEngineDllPath)' != ''">
+    <Copy SourceFiles="$(MacrosEngineDllPath)"
+          DestinationFiles="$(OutDir)MacrosEngine.dll" />
+  </Target>
+
+</Project>
