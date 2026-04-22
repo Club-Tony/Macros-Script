@@ -1,3 +1,4 @@
+using MacrosApp.Models;
 using System.Runtime.InteropServices;
 
 namespace MacrosApp;
@@ -12,8 +13,15 @@ internal static class WindowsInput
     private const uint KEYEVENTF_KEYUP = 0x0002;
     private const uint KEYEVENTF_SCANCODE = 0x0008;
 
-    public static bool SendLeftClick()
+    public static bool SendLeftClick(SendModeType sendMode)
     {
+        if (ResolveSendMode(sendMode) == SendModeType.Event)
+        {
+            mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, UIntPtr.Zero);
+            mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, UIntPtr.Zero);
+            return true;
+        }
+
         var inputs = new[]
         {
             CreateMouseInput(MOUSEEVENTF_LEFTDOWN),
@@ -23,20 +31,29 @@ internal static class WindowsInput
         return SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>()) == inputs.Length;
     }
 
-    public static bool SendKeyDown(Keys key)
+    public static bool SendKeyDown(Keys key, SendModeType sendMode)
     {
+        if (ResolveSendMode(sendMode) == SendModeType.Event)
+            return SendKeyEvent(key, keyUp: false);
+
         var input = CreateKeyboardInput(key, keyUp: false);
         return SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>()) == 1;
     }
 
-    public static bool SendKeyUp(Keys key)
+    public static bool SendKeyUp(Keys key, SendModeType sendMode)
     {
+        if (ResolveSendMode(sendMode) == SendModeType.Event)
+            return SendKeyEvent(key, keyUp: true);
+
         var input = CreateKeyboardInput(key, keyUp: true);
         return SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>()) == 1;
     }
 
-    public static bool SendKeyPress(Keys key)
+    public static bool SendKeyPress(Keys key, SendModeType sendMode)
     {
+        if (ResolveSendMode(sendMode) == SendModeType.Event)
+            return SendKeyEvent(key, keyUp: false) && SendKeyEvent(key, keyUp: true);
+
         var inputs = new[]
         {
             CreateKeyboardInput(key, keyUp: false),
@@ -44,6 +61,25 @@ internal static class WindowsInput
         };
 
         return SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>()) == inputs.Length;
+    }
+
+    // True journal-playback SendPlay is unsupported on modern Windows, so direct Play mode falls back to SendInput.
+    private static SendModeType ResolveSendMode(SendModeType sendMode)
+    {
+        return sendMode == SendModeType.Play ? SendModeType.Input : sendMode;
+    }
+
+    private static bool SendKeyEvent(Keys key, bool keyUp)
+    {
+        byte virtualKey = (byte)(key & Keys.KeyCode);
+        byte scanCode = (byte)MapVirtualKey(virtualKey, 0);
+        uint flags = keyUp ? KEYEVENTF_KEYUP : 0;
+
+        if (IsExtendedKey((Keys)(key & Keys.KeyCode)))
+            flags |= KEYEVENTF_EXTENDEDKEY;
+
+        keybd_event(virtualKey, scanCode, flags, UIntPtr.Zero);
+        return true;
     }
 
     private static INPUT CreateMouseInput(uint flags)
@@ -157,6 +193,12 @@ internal static class WindowsInput
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
 
     [DllImport("user32.dll")]
     private static extern uint MapVirtualKey(uint uCode, uint uMapType);

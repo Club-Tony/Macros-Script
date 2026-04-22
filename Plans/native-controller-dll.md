@@ -108,7 +108,7 @@ Current repo layout:
 - [x] End-to-end record/play/stop wired through the engine
 - [x] Persist newly recorded events back into `macros.ini` and `macros_events/*.txt`
 - [x] Load a selected slot's event file into native playback
-- [ ] Playback lifecycle polish and macro-mode parity cleanup
+- [ ] Playback lifecycle polish and remaining macro-mode parity cleanup (`SendMode` is now honored for direct app-emitted output; recorded slot playback still runs through the native engine path)
 
 ### Phase 3 - C# App (Rich UI)
 
@@ -135,7 +135,7 @@ Target MVP verification and app-behavior polish instead of more architecture wor
 
 1. Run the built WinForms app through the real user path: select an existing slot, play it, stop it, record a new macro, save it, and replay it.
 2. Keep the new smoke harness passing while fixing app-state gaps found during that path, especially playback lifecycle cleanup when native playback ends on its own.
-3. Verify which playback paths still ignore `SendMode`, then either wire parity or document the intentional limitation.
+3. Exercise no-controller startup plus attach/detach behavior in the UI so the app stays quiet when no pad is present and recovers cleanly when one appears.
 4. Keep controller visualization read-only for this milestone; defer vJoy and controller recording until keyboard/mouse parity is stable.
 
 That yields a concrete MVP: launch the WinForms app, view existing slots, record a keyboard/mouse macro, save it, replay it, and return cleanly to idle without running AHK.
