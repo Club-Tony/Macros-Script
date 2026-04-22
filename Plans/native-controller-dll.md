@@ -21,6 +21,7 @@ Verified on 2026-04-21:
 - `cmake --build MacrosEngine/build` succeeded
 - `MacrosEngine/build/test_engine.exe` built successfully
 - `dotnet build MacrosApp/MacrosApp/MacrosApp.csproj` succeeded
+- `dotnet run --no-build --project MacrosApp/tools/MacrosApp.Smoke/MacrosApp.Smoke.csproj` succeeded
 - `MacrosApp/tools/Validate-Tooltips.ps1` succeeded in deterministic source-validation mode
 
 ## Problem / Rationale
@@ -133,7 +134,7 @@ Current repo layout:
 Target MVP verification and app-behavior polish instead of more architecture work:
 
 1. Run the built WinForms app through the real user path: select an existing slot, play it, stop it, record a new macro, save it, and replay it.
-2. Fix app-state gaps found during that path, especially playback lifecycle cleanup when native playback ends on its own.
+2. Keep the new smoke harness passing while fixing app-state gaps found during that path, especially playback lifecycle cleanup when native playback ends on its own.
 3. Verify which playback paths still ignore `SendMode`, then either wire parity or document the intentional limitation.
 4. Keep controller visualization read-only for this milestone; defer vJoy and controller recording until keyboard/mouse parity is stable.
 
