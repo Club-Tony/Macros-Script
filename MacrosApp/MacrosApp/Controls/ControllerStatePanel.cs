@@ -1,7 +1,20 @@
 namespace MacrosApp.Controls;
 
+public sealed class ControllerConnectionChangedEventArgs : EventArgs
+{
+    public ControllerConnectionChangedEventArgs(bool isConnected)
+    {
+        IsConnected = isConnected;
+    }
+
+    public bool IsConnected { get; }
+}
+
 public class ControllerStatePanel : UserControl
 {
+    private const int ConnectedRefreshIntervalMs = 16;
+    private const int DisconnectedRefreshIntervalMs = 250;
+
     private enum HoverRegion
     {
         None,
@@ -29,6 +42,9 @@ public class ControllerStatePanel : UserControl
     private string _baseToolTipText = string.Empty;
     private string _activeToolTipText = string.Empty;
     private HoverRegion _hoverRegion = HoverRegion.None;
+    private bool _pollingAvailable = true;
+    private string _statusTitle = "Waiting for controller";
+    private string _statusDetail = "Turn on a controller to preview live input.";
 
     // Colors
     private static readonly Color BgColor = Color.FromArgb(30, 30, 30);
@@ -41,6 +57,8 @@ public class ControllerStatePanel : UserControl
     private static readonly Color ButtonOn = Color.FromArgb(0, 200, 80);
     private static readonly Color TextColor = Color.FromArgb(200, 200, 200);
     private static readonly Color DisconnectedColor = Color.FromArgb(120, 120, 120);
+    private static readonly Color DetailTextColor = Color.FromArgb(105, 105, 105);
+    private static readonly Color UnavailableColor = Color.FromArgb(200, 130, 50);
 
     // Xbox button masks
     private const ushort XINPUT_GAMEPAD_DPAD_UP = 0x0001;
@@ -70,6 +88,8 @@ public class ControllerStatePanel : UserControl
         set { _triggerDeadzone = value; Invalidate(); }
     }
 
+    public event EventHandler<ControllerConnectionChangedEventArgs>? ConnectionChanged;
+
     public ControllerStatePanel()
     {
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint |
@@ -83,8 +103,14 @@ public class ControllerStatePanel : UserControl
     public void StartRefresh()
     {
         if (_refreshTimer != null) return;
-        _refreshTimer = new System.Windows.Forms.Timer { Interval = 16 }; // ~60fps
+        _pollingAvailable = true;
+        SetDisconnectedStatus(
+            "Waiting for controller",
+            "Turn on a controller to preview live input.");
+
+        _refreshTimer = new System.Windows.Forms.Timer { Interval = DisconnectedRefreshIntervalMs };
         _refreshTimer.Tick += (_, _) => PollAndRefresh();
+        PollAndRefresh();
         _refreshTimer.Start();
     }
 
@@ -95,11 +121,29 @@ public class ControllerStatePanel : UserControl
         _refreshTimer = null;
     }
 
+    public void SetUnavailable(string detailText)
+    {
+        _pollingAvailable = false;
+        SetDisconnectedStatus("Controller preview unavailable", detailText);
+
+        bool connectionChanged = _connected;
+        _connected = false;
+        _state = default;
+        UpdateRefreshCadence(false);
+
+        if (connectionChanged)
+            ConnectionChanged?.Invoke(this, new ControllerConnectionChangedEventArgs(false));
+
+        Invalidate();
+    }
+
     private void PollAndRefresh()
     {
-        if (!Visible) return;
-        _connected = NativeEngine.TryGetControllerState(0, out _state);
-        Invalidate();
+        if (!Visible || !_pollingAvailable)
+            return;
+
+        bool connected = NativeEngine.TryGetControllerState(0, out var state);
+        ApplyPolledState(connected ? state : default, connected);
     }
 
     /// <summary>
@@ -107,9 +151,8 @@ public class ControllerStatePanel : UserControl
     /// </summary>
     public void SetState(ControllerState state, bool connected)
     {
-        _state = state;
-        _connected = connected;
-        Invalidate();
+        _pollingAvailable = true;
+        ApplyPolledState(connected ? state : default, connected);
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -180,13 +223,25 @@ public class ControllerStatePanel : UserControl
 
     private void DrawDisconnected(Graphics g)
     {
-        using var font = new Font("Segoe UI", 10f);
-        using var brush = new SolidBrush(DisconnectedColor);
-        var text = "Controller not connected";
-        var size = g.MeasureString(text, font);
-        g.DrawString(text, font, brush,
-            (ClientSize.Width - size.Width) / 2,
-            (ClientSize.Height - size.Height) / 2);
+        using var titleFont = new Font("Segoe UI", 10f, FontStyle.Bold);
+        using var detailFont = new Font("Segoe UI", 8.5f);
+        using var titleBrush = new SolidBrush(_pollingAvailable ? DisconnectedColor : UnavailableColor);
+        using var detailBrush = new SolidBrush(DetailTextColor);
+
+        var titleSize = g.MeasureString(_statusTitle, titleFont);
+        var detailSize = g.MeasureString(_statusDetail, detailFont, Math.Max(ClientSize.Width - 36, 120));
+        float totalHeight = titleSize.Height + 8 + detailSize.Height;
+        float titleX = (ClientSize.Width - titleSize.Width) / 2f;
+        float startY = (ClientSize.Height - totalHeight) / 2f;
+        var detailRect = new RectangleF(
+            18,
+            startY + titleSize.Height + 8,
+            Math.Max(ClientSize.Width - 36, 120),
+            detailSize.Height + 4);
+
+        g.DrawString(_statusTitle, titleFont, titleBrush, titleX, startY);
+        using var format = new StringFormat { Alignment = StringAlignment.Center };
+        g.DrawString(_statusDetail, detailFont, detailBrush, detailRect, format);
     }
 
     private void DrawStick(Graphics g, int cx, int cy, int radius, short rawX, short rawY, string label)
@@ -386,7 +441,9 @@ public class ControllerStatePanel : UserControl
     {
         return region switch
         {
-            HoverRegion.Disconnected => "No XInput controller is currently connected or readable by the native engine.",
+            HoverRegion.Disconnected => _pollingAvailable
+                ? "No XInput controller is connected right now. Turn one on and the live view will update automatically."
+                : "Controller preview is unavailable because the native engine is not ready for controller polling.",
             HoverRegion.LeftStick => $"Left stick input. The dot shows live X/Y position and the ring shows the thumb deadzone. Current raw: X={_state.LeftThumbX}, Y={_state.LeftThumbY}.",
             HoverRegion.RightStick => $"Right stick input. The dot shows live X/Y position and the ring shows the thumb deadzone. Current raw: X={_state.RightThumbX}, Y={_state.RightThumbY}.",
             HoverRegion.LeftTrigger => $"Left trigger input from 0 to 255. Current value: {_state.LeftTrigger}.",
@@ -413,5 +470,56 @@ public class ControllerStatePanel : UserControl
         int dx = point.X - centerX;
         int dy = point.Y - centerY;
         return (dx * dx) + (dy * dy) <= radius * radius;
+    }
+
+    private void ApplyPolledState(ControllerState state, bool connected)
+    {
+        bool connectionChanged = connected != _connected;
+        bool stateChanged = connected && !StatesEqual(_state, state);
+
+        if (!connected)
+        {
+            SetDisconnectedStatus(
+                "Waiting for controller",
+                "Turn on a controller to preview live input.");
+        }
+
+        _connected = connected;
+        _state = connected ? state : default;
+        UpdateRefreshCadence(connected);
+
+        if (connectionChanged)
+            ConnectionChanged?.Invoke(this, new ControllerConnectionChangedEventArgs(connected));
+
+        if (connectionChanged || stateChanged)
+            Invalidate();
+    }
+
+    private void UpdateRefreshCadence(bool connected)
+    {
+        if (_refreshTimer == null)
+            return;
+
+        int targetInterval = connected ? ConnectedRefreshIntervalMs : DisconnectedRefreshIntervalMs;
+        if (_refreshTimer.Interval != targetInterval)
+            _refreshTimer.Interval = targetInterval;
+    }
+
+    private void SetDisconnectedStatus(string title, string detail)
+    {
+        _statusTitle = title;
+        _statusDetail = detail;
+    }
+
+    private static bool StatesEqual(ControllerState left, ControllerState right)
+    {
+        return left.Connected == right.Connected &&
+               left.Buttons == right.Buttons &&
+               left.LeftThumbX == right.LeftThumbX &&
+               left.LeftThumbY == right.LeftThumbY &&
+               left.RightThumbX == right.RightThumbX &&
+               left.RightThumbY == right.RightThumbY &&
+               left.LeftTrigger == right.LeftTrigger &&
+               left.RightTrigger == right.RightTrigger;
     }
 }

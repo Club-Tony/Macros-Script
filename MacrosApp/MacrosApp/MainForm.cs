@@ -1,3 +1,4 @@
+using MacrosApp.Controls;
 using MacrosApp.Models;
 using System.Threading;
 
@@ -5,6 +6,10 @@ namespace MacrosApp;
 
 public partial class MainForm : Form
 {
+    private static readonly Color ControllerWaitingColor = Color.FromArgb(150, 150, 150);
+    private static readonly Color ControllerConnectedColor = Color.FromArgb(100, 200, 100);
+    private static readonly Color ControllerUnavailableColor = Color.FromArgb(200, 130, 50);
+
     private static readonly HashSet<Keys> ReservedHoldKeys = new()
     {
         Keys.F1,
@@ -114,6 +119,7 @@ public partial class MainForm : Form
 
         // Hotkey manager
         _hotkeyManager.HotkeyPressed += OnHotkeyPressed;
+        controllerState.ConnectionChanged += ControllerState_ConnectionChanged;
 
         // Slot list events
         slotList.PlayRequested += (_, slot) => PlaySlot(slot);
@@ -192,7 +198,7 @@ public partial class MainForm : Form
             "Sets the playback loop count for selected recording slots. Use 0 for infinite playback.");
 
         _hoverHelp.SetToolTip(controllerHeaderLabel,
-            "Live controller viewer fed by the native engine's XInput polling.");
+            "Live controller viewer fed by the native engine's XInput polling. If no controller is turned on, this panel waits quietly until one appears.");
         controllerState.ApplyToolTip(
             _hoverHelp,
             "Shows live controller connection state, sticks, triggers, and buttons. This is read-only right now.");
@@ -228,11 +234,14 @@ public partial class MainForm : Form
         {
             engineStatusLabel.Text = "Engine: loaded";
             engineStatusLabel.ForeColor = Color.FromArgb(100, 200, 100);
+            SetControllerViewerWaiting();
         }
         else
         {
             engineStatusLabel.Text = "Engine: not loaded";
             engineStatusLabel.ForeColor = Color.FromArgb(200, 130, 50);
+            controllerState.SetUnavailable("The native engine DLL is not available, so controller preview cannot start.");
+            SetControllerViewerUnavailable();
         }
     }
 
@@ -246,13 +255,25 @@ public partial class MainForm : Form
 
         if (NativeEngine.IsAvailable && NativeEngine.TryInit())
         {
-            NativeEngine.TryStartPolling(16);
-            controllerState.StartRefresh();
+            if (NativeEngine.TryStartPolling(16))
+            {
+                controllerState.StartRefresh();
+                SetControllerViewerWaiting();
+            }
+            else
+            {
+                engineStatusLabel.Text = "Engine: polling failed";
+                engineStatusLabel.ForeColor = ControllerUnavailableColor;
+                controllerState.SetUnavailable("The native engine initialized, but controller polling could not start.");
+                SetControllerViewerUnavailable();
+            }
         }
         else if (NativeEngine.IsAvailable)
         {
             engineStatusLabel.Text = "Engine: init failed";
-            engineStatusLabel.ForeColor = Color.FromArgb(200, 130, 50);
+            engineStatusLabel.ForeColor = ControllerUnavailableColor;
+            controllerState.SetUnavailable("The native engine loaded, but initialization failed before controller preview could start.");
+            SetControllerViewerUnavailable();
         }
     }
 
@@ -273,6 +294,7 @@ public partial class MainForm : Form
         DisposePlaybackMonitor();
         _hotkeyManager.Dispose();
         controllerState.StopRefresh();
+        NativeEngine.TryStopPolling();
         NativeEngine.TryShutdown();
     }
 
@@ -319,6 +341,7 @@ public partial class MainForm : Form
         DisposePlaybackMonitor();
         _hotkeyManager.Dispose();
         controllerState.StopRefresh();
+        NativeEngine.TryStopPolling();
         NativeEngine.TryShutdown();
 
         if (_trayIcon != null)
@@ -333,6 +356,14 @@ public partial class MainForm : Form
     // ================================================================
     // HOTKEYS
     // ================================================================
+
+    private void ControllerState_ConnectionChanged(object? sender, ControllerConnectionChangedEventArgs e)
+    {
+        if (e.IsConnected)
+            SetControllerViewerConnected();
+        else
+            SetControllerViewerWaiting();
+    }
 
     protected override void WndProc(ref Message m)
     {
@@ -1108,6 +1139,24 @@ public partial class MainForm : Form
             MacroState.Paused => Color.FromArgb(255, 200, 50),
             _ => Color.FromArgb(200, 200, 200)
         };
+    }
+
+    private void SetControllerViewerWaiting()
+    {
+        controllerHeaderLabel.Text = "Controller (waiting)";
+        controllerHeaderLabel.ForeColor = ControllerWaitingColor;
+    }
+
+    private void SetControllerViewerConnected()
+    {
+        controllerHeaderLabel.Text = "Controller (connected)";
+        controllerHeaderLabel.ForeColor = ControllerConnectedColor;
+    }
+
+    private void SetControllerViewerUnavailable()
+    {
+        controllerHeaderLabel.Text = "Controller (unavailable)";
+        controllerHeaderLabel.ForeColor = ControllerUnavailableColor;
     }
 
     private void PollPlaybackState()
