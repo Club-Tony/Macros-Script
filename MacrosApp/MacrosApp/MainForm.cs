@@ -22,6 +22,8 @@ public partial class MainForm : Form
     private MacroSettings _settings = new();
     private System.Threading.Timer? _autoclickTimer;
     private bool _autoclickerRunning;
+    private System.Windows.Forms.Timer? _playbackStateTimer;
+    private bool _slotPlaybackActive;
     private RecordingInputHook? _recordingInputHook;
     private DateTime _recordingIgnoreUntilUtc = DateTime.MinValue;
     private bool _hotkeysSuspended;
@@ -64,6 +66,7 @@ public partial class MainForm : Form
         InitializeToolTips();
         InitializeManagers();
         WireEvents();
+        InitializePlaybackMonitor();
         LoadData();
         UpdateEngineStatus();
     }
@@ -130,6 +133,16 @@ public partial class MainForm : Form
                 _settings.SendMode = mode;
         };
         nudLoopCount.ValueChanged += (_, _) => _settings.LoopCount = (int)nudLoopCount.Value;
+    }
+
+    private void InitializePlaybackMonitor()
+    {
+        _playbackStateTimer = new System.Windows.Forms.Timer(components)
+        {
+            Interval = 150
+        };
+        _playbackStateTimer.Tick += (_, _) => PollPlaybackState();
+        _playbackStateTimer.Start();
     }
 
     private void InitializeToolTips()
@@ -257,6 +270,7 @@ public partial class MainForm : Form
         DeactivateHoldMode(silent: true);
         DisposeRecordingHook();
         DisposeAutoclickerTimer();
+        DisposePlaybackMonitor();
         _hotkeyManager.Dispose();
         controllerState.StopRefresh();
         NativeEngine.TryShutdown();
@@ -302,6 +316,7 @@ public partial class MainForm : Form
         DeactivateHoldMode(silent: true);
         DisposeRecordingHook();
         DisposeAutoclickerTimer();
+        DisposePlaybackMonitor();
         _hotkeyManager.Dispose();
         controllerState.StopRefresh();
         NativeEngine.TryShutdown();
@@ -390,7 +405,10 @@ public partial class MainForm : Form
         if (_activeMacroType != null)
             DeactivateCurrentMacro();
         else if (NativeEngine.TryIsPlaying())
+        {
+            StopSlotPlaybackTracking();
             NativeEngine.TryStopPlayback();
+        }
 
         // Activate new
         switch (type)
@@ -472,6 +490,7 @@ public partial class MainForm : Form
     {
         if (_currentState == MacroState.Playing && NativeEngine.TryIsPlaying())
         {
+            StopSlotPlaybackTracking();
             NativeEngine.TryStopPlayback();
             SetState(MacroState.Idle, "Idle");
             return;
@@ -521,7 +540,10 @@ public partial class MainForm : Form
         try
         {
             if (NativeEngine.TryIsPlaying())
+            {
+                StopSlotPlaybackTracking();
                 NativeEngine.TryStopPlayback();
+            }
 
             if (!NativeEngine.TryStartPlayback(buffer, count, (uint)Math.Max(0, _settings.LoopCount)))
             {
@@ -529,6 +551,7 @@ public partial class MainForm : Form
                 return;
             }
 
+            _slotPlaybackActive = true;
             SetState(MacroState.Playing, $"Playing: {slot.Name}");
         }
         finally
@@ -545,6 +568,7 @@ public partial class MainForm : Form
         }
         else if (_currentState == MacroState.Playing)
         {
+            StopSlotPlaybackTracking();
             NativeEngine.TryStopPlayback();
             SetState(MacroState.Idle, "Idle");
         }
@@ -1084,6 +1108,37 @@ public partial class MainForm : Form
             MacroState.Paused => Color.FromArgb(255, 200, 50),
             _ => Color.FromArgb(200, 200, 200)
         };
+    }
+
+    private void PollPlaybackState()
+    {
+        if (!_slotPlaybackActive)
+            return;
+
+        if (NativeEngine.TryIsPlaying())
+            return;
+
+        StopSlotPlaybackTracking();
+
+        if (_activeMacroType == null && _currentState == MacroState.Playing)
+            SetState(MacroState.Idle, "Idle");
+    }
+
+    private void StopSlotPlaybackTracking()
+    {
+        _slotPlaybackActive = false;
+    }
+
+    private void DisposePlaybackMonitor()
+    {
+        StopSlotPlaybackTracking();
+
+        if (_playbackStateTimer == null)
+            return;
+
+        _playbackStateTimer.Stop();
+        _playbackStateTimer.Dispose();
+        _playbackStateTimer = null;
     }
 
     private void HighlightButton(Button btn, bool active)
