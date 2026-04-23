@@ -1,12 +1,13 @@
 # Macros-Script - C# App + Native C Engine DLL
 
-**Status:** In Progress
+**Status:** Completed
 **Created:** 2026-03-23
+**Completed:** 2026-04-22
 **Goal:** Finish migrating Macros-Script into a two-layer architecture: a C# desktop app for UX plus a native C engine DLL for timing-sensitive input and controller work, while preserving compatibility with the existing AHK-era data files during the transition.
 
 ## Current Status Snapshot
 
-As of 2026-04-21, this repo is beyond the proposal stage and already has a working vertical slice.
+As of 2026-04-22, the C# app plus native-engine MVP milestone is complete.
 
 - `MacrosEngine/` exists as a native DLL plus smoke-test executable.
 - `MacrosApp/` exists as a WinForms shell with tray behavior, global hotkeys, slot/profile loading, controller visualization, recording hooks, native playback, and save-to-disk flow.
@@ -14,18 +15,22 @@ As of 2026-04-21, this repo is beyond the proposal stage and already has a worki
 - Slot playback now reconciles back to `Idle` when native playback finishes on its own, and the repo-side smoke harness covers record, save, replay, and idle cleanup.
 - Direct app-emitted macro output now honors `SendMode` for `Input` and `Event`; `Play` falls back to `Input` on modern Windows, while recorded slot playback still uses the native engine path.
 - The controller viewer now treats no-controller startup as a quiet waiting state and switches between waiting, connected, and unavailable states without treating "no controller turned on" as an error.
-- The architecture choice is validated. The remaining work is MVP verification, app-behavior polish, controller playback, and packaging.
+- Turbo Hold and Pure Hold are implemented as real keyboard-targeted hold modes with global key binding and clean teardown.
+- Hover help is implemented across the main UI, saved-slot rows, controller panel regions, and status-strip items.
+- The architecture choice is validated. Remaining ideas such as controller playback, richer profile editing, packaging, and future automated GUI testing are deferred follow-up work, not blockers for this milestone.
 
 ## Verification
 
-Verified on 2026-04-21:
+Verified on 2026-04-22:
 
-- `cmake -S MacrosEngine -B MacrosEngine/build` succeeded
-- `cmake --build MacrosEngine/build` succeeded
-- `MacrosEngine/build/test_engine.exe` built successfully
+- `cmake -S MacrosEngine -B MacrosEngine/build-x64` succeeded with the x64 MinGW toolchain
+- `cmake --build MacrosEngine/build-x64` succeeded
+- `MacrosEngine/build-x64/test_engine.exe` passed `48 / 48`
 - `dotnet build MacrosApp/MacrosApp/MacrosApp.csproj` succeeded
 - `dotnet run --project MacrosApp/tools/MacrosApp.Smoke/MacrosApp.Smoke.csproj` succeeded
 - `MacrosApp/tools/Validate-Tooltips.ps1` succeeded in deterministic source-validation mode
+- In-process WinForms tooltip validation passed for static tooltips plus dynamic saved-slot and controller-state tooltips
+- GUI launch smoke test succeeded with the x64 native DLL copied beside the app output
 
 ## Problem / Rationale
 
@@ -111,7 +116,7 @@ Current repo layout:
 - [x] End-to-end record/play/stop wired through the engine
 - [x] Persist newly recorded events back into `macros.ini` and `macros_events/*.txt`
 - [x] Load a selected slot's event file into native playback
-- [ ] Playback lifecycle polish and remaining macro-mode parity cleanup (`SendMode` is now honored for direct app-emitted output; recorded slot playback still runs through the native engine path)
+- [x] Playback lifecycle polish and direct macro-mode parity cleanup for `Input` and `Event` output; recorded slot playback intentionally still runs through the native engine path
 
 ### Phase 3 - C# App (Rich UI)
 
@@ -119,6 +124,7 @@ Current repo layout:
 - [x] Profile manager foundation (load profiles, detect active profile by process)
 - [x] Live controller state display
 - [x] Deadzone visualization
+- [x] Hover tooltips for the primary UI, saved slots, controller viewer, and status strip
 - [ ] Rich settings and profile editing UI
 - [ ] Recording preview or timeline visualization
 - [ ] Sequence builder
@@ -132,16 +138,28 @@ Current repo layout:
 - [ ] First-run import or migration UX for `macros.ini`, `macros_events/*.txt`, and `profiles.ini`
 - [ ] No-installer packaging story for the app plus DLL
 
-## Recommended Next Milestone
+## Completion Outcome
 
-Target MVP verification and app-behavior polish instead of more architecture work:
+This plan is complete for the intended MVP migration milestone:
 
-1. Run the built WinForms app through the real user path: select an existing slot, play it, stop it, record a new macro, save it, and replay it.
-2. Keep the new smoke harness passing while fixing app-state gaps found during that path, especially playback lifecycle cleanup when native playback ends on its own.
-3. Manually verify the controller viewer with a real device attach/detach pass now that the UI waits quietly when no pad is present and switches back to live polling when one appears.
-4. Keep controller visualization read-only for this milestone; defer vJoy and controller recording until keyboard/mouse parity is stable.
+- The WinForms app launches against the x64 native DLL.
+- Existing macro slots can be loaded and replayed through the native engine path.
+- Keyboard/mouse recording can be saved back into the legacy-compatible data files.
+- Direct macro modes now cover slash/click, autoclicker, Turbo Hold, and Pure Hold.
+- Tooltips document what the visible UI elements do after a short hover.
+- Native and managed validation checks are passing.
 
-That yields a concrete MVP: launch the WinForms app, view existing slots, record a keyboard/mouse macro, save it, replay it, and return cleanly to idle without running AHK.
+Further broad testing is intentionally deferred until a future testing feature or harness exists. Manual smoke testing can still be done later, but it is not a blocker for closing this plan.
+
+## Deferred Follow-Up Work
+
+These are future plans, not remaining requirements for this completed milestone:
+
+- Controller button-combo detection, controller-event recording, and vJoy controller playback.
+- Playback-thread hardening to remove the `TerminateThread()` timeout fallback.
+- Rich settings/profile editing UI, recording timeline preview, sequence builder, and tray-menu parity.
+- Self-contained publish flow, first-run import UX, and no-installer packaging.
+- Stronger automated GUI/end-to-end testing once the future testing capability exists.
 
 ## Key Constraints
 
@@ -178,4 +196,4 @@ That would simplify the stack, but the current repo already has a working native
 
 ## When
 
-Medium priority. The current AHK version still works, and the prototype architecture now exists. The best path is incremental implementation: finish keyboard/mouse MVP behavior in the WinForms app first, then add controller playback and packaging.
+Completed for the keyboard/mouse MVP migration milestone on 2026-04-22. Future controller playback, packaging, and automated GUI testing should be tracked as separate plans when they become active work.
