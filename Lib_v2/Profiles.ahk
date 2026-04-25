@@ -11,7 +11,7 @@ class ProfileManager {
     ; DETECT & APPLY
     ; ──────────────────────────────────────────────────────────────────────────
     Detect() {
-        global sendMode, vJoyDeviceId
+        global currentSendMode, vJoyDeviceId
         iniPath := A_ScriptDir "\profiles.ini"
         this.EnsureDefaults(iniPath)
 
@@ -35,7 +35,7 @@ class ProfileManager {
     }
 
     Apply(profileName, iniPath := "") {
-        global sendMode, vJoyDeviceId
+        global currentSendMode, vJoyDeviceId
         if (iniPath = "")
             iniPath := A_ScriptDir "\profiles.ini"
         sm    := IniRead(iniPath, profileName, "SendMode",     "Input")
@@ -45,7 +45,7 @@ class ProfileManager {
         this.sendMode     := sm
         this.vJoyDeviceId := Integer(vjId)
         this.vJoyPovMode  := vjPov
-        sendMode := sm
+        currentSendMode := sm
         vJoyDeviceId := Integer(vjId)
         ; Apply sendMode in AHK v2
         SendMode sm
