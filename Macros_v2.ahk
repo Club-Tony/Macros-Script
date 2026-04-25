@@ -133,11 +133,26 @@ $^+!z:: {
         ActivateClickMacro()
         ShowMacroToggledTip("Macro Toggled - F12 => Left click", 3000, false)
     }
-    F2:: { CloseMenu("", true); StartAutoclickerSetup() }
-    F3:: { CloseMenu("", true); StartHoldMacroSetup() }
-    F4:: { CloseMenu("", true); StartPureHoldSetup() }
-    F5:: { CloseMenu("", true); StartRecorder() }
-    F6:: { CloseMenu("", true); StartRecorder("combined", false, "client") }
+    F2:: {
+        CloseMenu("", true)
+        StartAutoclickerSetup()
+    }
+    F3:: {
+        CloseMenu("", true)
+        StartHoldMacroSetup()
+    }
+    F4:: {
+        CloseMenu("", true)
+        StartPureHoldSetup()
+    }
+    F5:: {
+        CloseMenu("", true)
+        StartRecorder()
+    }
+    F6:: {
+        CloseMenu("", true)
+        StartRecorder("combined", false, "client")
+    }
 #HotIf
 
 #HotIf clickMacroOn
@@ -612,10 +627,24 @@ StartAutoclickerSetup() {
     autoClickReady := true
     ShowMacroToggledTip("Macro ready - F12 toggles autoclicker (" autoClickInterval " ms)")
 }
-StartHoldMacroSetup()  { ShowMacroToggledTip("Turbo hold: not yet ported to v2", 2000, false) }
-StartPureHoldSetup()   { ShowMacroToggledTip("Pure hold: not yet ported to v2",  2000, false) }
-DeactivateHoldMacro(silent := false)  { global holdMacroOn, holdMacroReady; holdMacroOn := false; holdMacroReady := false }
-DeactivatePureHold(silent := false)   { global holdHoldOn, holdHoldReady;   holdHoldOn  := false; holdHoldReady  := false }
+StartHoldMacroSetup() {
+    ShowMacroToggledTip("Turbo hold: not yet ported to v2", 2000, false)
+}
+
+StartPureHoldSetup() {
+    ShowMacroToggledTip("Pure hold: not yet ported to v2", 2000, false)
+}
+DeactivateHoldMacro(silent := false) {
+    global holdMacroOn, holdMacroReady
+    holdMacroOn := false
+    holdMacroReady := false
+}
+
+DeactivatePureHold(silent := false) {
+    global holdHoldOn, holdHoldReady
+    holdHoldOn := false
+    holdHoldReady := false
+}
 
 TrayMenuRebuild() {
     global tray
