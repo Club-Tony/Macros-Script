@@ -223,9 +223,16 @@ class SlotManager {
                         loop {
                             cand := sec "_" i
                             found := false
-                            for nm2 in existingNames
-                                if (nm2 = cand) { found := true; break }
-                            if !found { finalName := cand; break }
+                            for nm2 in existingNames {
+                                if (nm2 = cand) {
+                                    found := true
+                                    break
+                                }
+                            }
+                            if !found {
+                                finalName := cand
+                                break
+                            }
                             i++
                         }
                     }
@@ -242,7 +249,8 @@ class SlotManager {
             alreg := false
             loop cnt {
                 if (IniRead(iniPath, "Slots", "slot_" A_Index, "") = finalName) {
-                    alreg := true; break
+                    alreg := true
+                    break
                 }
             }
             if !alreg {
@@ -380,7 +388,10 @@ class SequenceManager {
                 break
             found := false
             for nm in names
-                if (nm = input) { found := true; break }
+                if (nm = input) {
+                    found := true
+                    break
+                }
             if !found {
                 ShowMacroToggledTip("Slot '" input "' not found", 1500, false)
                 continue
@@ -403,7 +414,10 @@ class SequenceManager {
         cnt := IniRead(iniPath, "Sequences", "count", 0)
         alreg := false
         loop cnt {
-            if (IniRead(iniPath, "Sequences", "seq_" A_Index, "") = seqName) { alreg := true; break }
+            if (IniRead(iniPath, "Sequences", "seq_" A_Index, "") = seqName) {
+                alreg := true
+                break
+            }
         }
         if !alreg {
             IniWrite cnt + 1, iniPath, "Sequences", "count"
