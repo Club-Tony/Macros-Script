@@ -6,3 +6,4 @@ MacrosEngine/build/
 MacrosEngine/build-*/
 MacrosApp/**/bin/
 MacrosApp/**/obj/
+tests/live/artifacts/
