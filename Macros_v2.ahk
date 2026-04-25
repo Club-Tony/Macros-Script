@@ -67,7 +67,7 @@ global controllerXInputFailed := false
 global vJoyDeviceId := 1
 global vJoyReady    := false
 
-global sendMode := "Input"
+global currentSendMode := "Input"
 global debugEnabled := false
 
 ; ── Class instances ───────────────────────────────────────────────────────────
@@ -188,28 +188,28 @@ $^+!z:: {
 ; ── Core functions ────────────────────────────────────────────────────────────
 
 ToggleSendMode() {
-    global sendMode, menuActive, holdMacroOn, holdHoldOn, activeProfile := profile
+    global currentSendMode, menuActive, holdMacroOn, holdHoldOn
     if (holdMacroOn || holdHoldOn) {
         ShowMacroToggledTip("Cannot change SendMode while hold is active", 2000, false)
         return
     }
-    sendMode := (sendMode = "Input") ? "Play" : (sendMode = "Play") ? "Event" : "Input"
-    SendMode sendMode
+    currentSendMode := (currentSendMode = "Input") ? "Play" : (currentSendMode = "Play") ? "Event" : "Input"
+    SendMode currentSendMode
     SetKeyDelay -1, -1
     SetMouseDelay -1
-    profile.sendMode := sendMode
+    profile.sendMode := currentSendMode
     tray.Rebuild()
-    ShowMacroToggledTip("SendMode: " sendMode " (Ctrl+Alt+P to cycle)", 2000, false)
+    ShowMacroToggledTip("SendMode: " currentSendMode " (Ctrl+Alt+P to cycle)", 2000, false)
     if menuActive
         ToolTip MenuTooltipText()
 }
 
 ShowMacroToggledTip(text := "Macro Toggled", durationMs := 3000, earlyHide := true) {
-    global sendMode
+    global currentSendMode
     if InStr(text, "Macro Toggled Off")
-        text := "Macro Toggled Off (SendMode: " sendMode ") - Esc to exit"
+        text := "Macro Toggled Off (SendMode: " currentSendMode ") - Esc to exit"
     else
-        text := text " (SendMode: " sendMode ")"
+        text := text " (SendMode: " currentSendMode ")"
     tipX := A_ScreenWidth - 320
     tipY := A_ScreenHeight - 100
     ToolTip text, tipX, tipY
@@ -217,9 +217,9 @@ ShowMacroToggledTip(text := "Macro Toggled", durationMs := 3000, earlyHide := tr
 }
 
 MenuTooltipText() {
-    global sendMode, profile, recorder
+    global currentSendMode, profile, recorder
     slotDisplay := (recorder.slotName != "") ? recorder.slotName : "(none)"
-    text := "Slot: " slotDisplay " | Profile: " profile.name " | SendMode: " sendMode "`n"
+    text := "Slot: " slotDisplay " | Profile: " profile.name " | SendMode: " currentSendMode "`n"
           . "────────────────────────────────`n"
           . "F1 - Stage left click with F12 key`n"
           . "F2 - Stage Autoclicker (F12 toggles)`n"
@@ -227,18 +227,18 @@ MenuTooltipText() {
           . "F4 - Stage pure key hold`n"
           . "F5 - Record Macro (screen coords)`n"
           . "F6 - Record Macro (client-locked mouse)`n"
-          . "^!P - Cycle send mode (" sendMode ")`n"
+          . "^!P - Cycle send mode (" currentSendMode ")`n"
           . "^!D - Toggle debug`n"
           . "Right-click tray for slots, profiles, sequences"
     return text
 }
 
 ShowHotkeyHelp() {
-    global sendMode
+    global currentSendMode
     ToolTip "Macros Script Hotkeys`n"
           . "======================`n"
           . "Ctrl+Shift+Alt+Z - Open macro menu`n"
-          . "Ctrl+Alt+P - Cycle SendMode (" sendMode ") Input→Play→Event`n"
+          . "Ctrl+Alt+P - Cycle SendMode (" currentSendMode ") Input→Play→Event`n"
           . "Ctrl+Alt+D - Toggle debug mode`n"
           . "Ctrl+Esc - Reload script`n"
           . "Right-click tray - Full menu (slots, sequences, profiles)`n"
@@ -296,14 +296,14 @@ CloseMenu(reason := "", skipReload := false) {
         SetTimer () => Reload(), -100
 }
 
-; Stubs — these functions are implemented in the full v1 script and would need
-; porting from the existing Macros.ahk controller/recording/playback logic.
-; They are declared here so the v2 file is syntactically complete and the
-; #HotIf contexts compile correctly.
+; ── Recorder / playback / sequence core ─────────────────────────────────────
+; Keyboard/mouse recorder, playback engine, and sequence chaining.
+; NOTE: Controller recording (RecorderSampleController) and vJoy playback are
+; NOT yet ported — see Plans/v2-port-completion.md.
 
 StartRecorder(mode := "combined", suppressCombo := false, mouseCoordSpace := "screen") {
     global recorderActive, recorderEvents, recorderStart, recorderLast
-    global recorderSendMode, sendMode, recorderKbMouseEnabled, recorderControllerEnabled
+    global recorderSendMode, currentSendMode, recorderKbMouseEnabled, recorderControllerEnabled
     global recorderMouseCoordSpace, recorderHasControllerEvents, recorderControllerPrevState
     global recorderControllerSuppress, recorderControllerSuppressUntil
     recorderActive := true
@@ -312,7 +312,7 @@ StartRecorder(mode := "combined", suppressCombo := false, mouseCoordSpace := "sc
     recorderHasControllerEvents := false
     recorderStart := A_TickCount
     recorderLast  := recorderStart
-    recorderSendMode := sendMode
+    recorderSendMode := currentSendMode
     recorderKbMouseEnabled := (mode = "combined")
     recorderControllerEnabled := true
     recorderControllerPrevState := ""
@@ -500,8 +500,8 @@ RecorderAddEvent(type, code := "", state := "", x := "", y := "", payload := "")
 }
 
 SendEventOrInput(seq) {
-    global recorderSendMode, sendMode
-    modeToUse := (recorderSendMode != "") ? recorderSendMode : sendMode
+    global recorderSendMode, currentSendMode
+    modeToUse := (recorderSendMode != "") ? recorderSendMode : currentSendMode
     if (modeToUse = "Play")
         SendPlay seq
     else if (modeToUse = "Event")
