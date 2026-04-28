@@ -29,6 +29,21 @@ typedef struct {
 } ControllerState;
 
 /* ----------------------------------------------------------------
+ * vJoy state
+ * ---------------------------------------------------------------- */
+typedef struct {
+    bool     available;        /* vJoyInterface.dll was found/loaded   */
+    bool     enabled;          /* vJoy driver reports enabled          */
+    bool     ready;            /* current device is acquired/usable    */
+    uint32_t device_id;        /* selected vJoy device id              */
+    uint32_t status;           /* VJD_STAT_* from vJoyInterface        */
+    uint32_t button_count;
+    uint32_t cont_pov_count;
+    uint32_t disc_pov_count;
+    uint32_t axis_exists_mask; /* bitmask: X,Y,Z,RX,RY,RZ,SL0,SL1      */
+} VJoyState;
+
+/* ----------------------------------------------------------------
  * Event types
  * ---------------------------------------------------------------- */
 typedef enum {
@@ -73,6 +88,9 @@ ENGINE_API bool        Engine_GetControllerState(uint32_t player_index,
 ENGINE_API void        Engine_SetDeadzone(uint32_t player_index,
                                            int16_t  thumb_deadzone,
                                            uint8_t  trigger_deadzone);
+ENGINE_API bool        Engine_StartControllerRecording(void);
+ENGINE_API void        Engine_StopControllerRecording(void);
+ENGINE_API bool        Engine_IsRecordingController(void);
 
 /* ----------------------------------------------------------------
  * Recording
@@ -93,6 +111,7 @@ ENGINE_API bool        Engine_RecordMouseMove(int32_t x, int32_t y);
 ENGINE_API bool        Engine_RecordMouseButton(bool     down,
                                                  uint16_t button);
 ENGINE_API bool        Engine_RecordMouseWheel(int32_t delta);
+ENGINE_API bool        Engine_RecordControllerEvent(const ControllerState *state);
 
 /* ----------------------------------------------------------------
  * Playback
@@ -105,6 +124,12 @@ ENGINE_API void        Engine_PausePlayback(void);
 ENGINE_API void        Engine_ResumePlayback(void);
 ENGINE_API bool        Engine_IsPlaying(void);
 ENGINE_API bool        Engine_IsPaused(void);
+
+/* ----------------------------------------------------------------
+ * vJoy output
+ * ---------------------------------------------------------------- */
+ENGINE_API bool        Engine_SetVJoyDeviceId(uint32_t device_id);
+ENGINE_API bool        Engine_GetVJoyState(VJoyState *state);
 
 /* ----------------------------------------------------------------
  * Event file I/O (backward-compatible AHK pipe-delimited format)

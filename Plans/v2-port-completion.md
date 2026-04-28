@@ -1,6 +1,6 @@
 # AHK v2 Port Completion
 
-**Status:** Planned
+**Status:** On Hold (native-first decision 2026-04-28)
 **Created:** 2026-04-24
 **Goal:** Bring `Macros_v2.ahk` + `Lib_v2/` to feature parity with `Macros.ahk` + `Lib/`.
 
@@ -8,7 +8,7 @@
 
 The v2 port currently sits at ~23% of v1's line count (1,428 vs 6,258 LOC). The 2026-04-24 debug session unblocked v2 by fixing a `sendMode` global / built-in `SendMode` function name collision in `Lib_v2/Profiles.ahk:48` (renamed global to `currentSendMode`). With that fix, v2 parses and loads, but it remains a keyboard/mouse-only MVP — controller input, vJoy output, the GUI panel, and several library files are absent.
 
-Open question before starting: is v2 still the long-term plan, or is `MacrosApp` (C# + native engine) the intended replacement for v1, with v2 deprecated? If the latter, this plan should be cancelled. **Resolve this question before allocating work.**
+Resolution as of 2026-04-28: `MacrosApp` (C# + native engine) is the active replacement path. Keep this AHK v2 parity plan on hold unless native parity fails or a specific AHK v2 need appears.
 
 ## What v2 currently has
 
@@ -46,7 +46,7 @@ Recommended order (independent → dependent):
 
 ## When
 
-Only start once the v1-vs-MacrosApp strategic question is resolved. If v2 stays in the picture, this is multi-week effort — break each numbered step above into its own sub-plan and ship incrementally. Each sub-plan should land independently with tests and live verification.
+Do not start AHK v2 parity work while the native MacrosApp path remains viable. Revisit this plan only if the native parity gate fails, a concrete AHK v2-only need appears, or the user explicitly reactivates the v2 port. If reactivated, treat this as a multi-week effort and break each numbered step above into its own sub-plan with tests and live verification.
 
 ## Critical files
 

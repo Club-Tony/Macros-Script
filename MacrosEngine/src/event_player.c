@@ -14,6 +14,7 @@
 #include "../include/macros_engine.h"
 #include "timing.h"
 #include <windows.h>
+#include <stdlib.h>
 #include <string.h>
 
 #ifndef MOUSEEVENTF_HWHEEL
@@ -21,12 +22,14 @@
 #endif
 
 extern CRITICAL_SECTION g_engine_cs;
+extern bool vjoy_dispatch_controller(const ControllerState *state);
 
 /* ================================================================
  * Module state
  * ================================================================ */
 
 static HANDLE          g_play_thread     = NULL;
+static HANDLE          g_player_cancel   = NULL;
 static volatile bool   g_playing         = false;
 static volatile bool   g_paused          = false;
 static volatile bool   g_stop_requested  = false;
@@ -35,6 +38,15 @@ static volatile bool   g_stop_requested  = false;
 static MacroEvent     *g_play_events     = NULL;
 static uint32_t        g_play_count      = 0;
 static uint32_t        g_play_loops      = 0;   /* 0 = infinite */
+
+static void close_finished_play_thread(void)
+{
+    if (g_play_thread &&
+        WaitForSingleObject(g_play_thread, 0) == WAIT_OBJECT_0) {
+        CloseHandle(g_play_thread);
+        g_play_thread = NULL;
+    }
+}
 
 /* ================================================================
  * Dispatch helpers
@@ -159,10 +171,41 @@ static void dispatch_event(const MacroEvent *evt)
         dispatch_mouse_wheel(evt);
         break;
     case EVENT_CONTROLLER:
-        /* Controller output requires vJoy -- log and skip */
-        OutputDebugStringA("MacrosEngine: EVENT_CONTROLLER skipped (vJoy not implemented)\n");
+        if (!vjoy_dispatch_controller(&evt->data.controller))
+            OutputDebugStringA("MacrosEngine: EVENT_CONTROLLER skipped (vJoy unavailable)\n");
         break;
     }
+}
+
+static bool wait_with_cancel_us(int64_t delay_us)
+{
+    int64_t end_us = timing_get_us() + delay_us;
+
+    while (!g_stop_requested) {
+        int64_t remain_us = end_us - timing_get_us();
+        if (remain_us <= 0)
+            break;
+
+        if (g_player_cancel &&
+            WaitForSingleObject(g_player_cancel, 0) == WAIT_OBJECT_0)
+            return false;
+
+        if (remain_us > 2000) {
+            DWORD wait_ms = (DWORD)(remain_us / 1000);
+            if (wait_ms > 50)
+                wait_ms = 50;
+            if (g_player_cancel) {
+                DWORD wait_result = WaitForSingleObject(g_player_cancel, wait_ms);
+                if (wait_result == WAIT_OBJECT_0)
+                    return false;
+            } else {
+                Sleep(wait_ms);
+            }
+        } else {
+            timing_sleep_us(remain_us);
+        }
+    }
+    return !g_stop_requested;
 }
 
 /* ================================================================
@@ -181,8 +224,11 @@ static DWORD WINAPI play_thread_proc(LPVOID param)
 
         for (uint32_t i = 0; i < g_play_count && !g_stop_requested; i++) {
             /* Handle pause */
-            while (g_paused && !g_stop_requested)
-                Sleep(5);
+            while (g_paused && !g_stop_requested) {
+                if (g_player_cancel &&
+                    WaitForSingleObject(g_player_cancel, 5) == WAIT_OBJECT_0)
+                    break;
+            }
 
             if (g_stop_requested)
                 break;
@@ -190,8 +236,8 @@ static DWORD WINAPI play_thread_proc(LPVOID param)
             /* Wait for this event's timestamp */
             int64_t target = base_us + g_play_events[i].timestamp_us;
             int64_t remain = target - timing_get_us();
-            if (remain > 0)
-                timing_sleep_us(remain);
+            if (remain > 0 && !wait_with_cancel_us(remain))
+                break;
 
             if (g_stop_requested)
                 break;
@@ -212,6 +258,15 @@ static DWORD WINAPI play_thread_proc(LPVOID param)
  * Public API
  * ================================================================ */
 
+bool player_init(void)
+{
+    if (g_player_cancel)
+        return true;
+
+    g_player_cancel = CreateEventA(NULL, TRUE, FALSE, NULL);
+    return g_player_cancel != NULL;
+}
+
 ENGINE_API bool Engine_StartPlayback(const MacroEvent *events,
                                       uint32_t count,
                                       uint32_t loop_count)
@@ -220,6 +275,7 @@ ENGINE_API bool Engine_StartPlayback(const MacroEvent *events,
         return false;
 
     EnterCriticalSection(&g_engine_cs);
+    close_finished_play_thread();
 
     if (g_playing) {
         LeaveCriticalSection(&g_engine_cs);
@@ -242,10 +298,15 @@ ENGINE_API bool Engine_StartPlayback(const MacroEvent *events,
     g_stop_requested = false;
     g_paused         = false;
     g_playing        = true;
+    if (g_player_cancel)
+        ResetEvent(g_player_cancel);
 
     g_play_thread = CreateThread(NULL, 0, play_thread_proc, NULL, 0, NULL);
     if (!g_play_thread) {
         g_playing = false;
+        free(g_play_events);
+        g_play_events = NULL;
+        g_play_count = 0;
         LeaveCriticalSection(&g_engine_cs);
         return false;
     }
@@ -259,17 +320,24 @@ ENGINE_API void Engine_StopPlayback(void)
     if (!g_playing && !g_play_thread)
         return;
 
+    close_finished_play_thread();
+    if (!g_playing && !g_play_thread)
+        return;
+
     g_stop_requested = true;
     g_paused = false;   /* un-pause so the thread can exit */
+    if (g_player_cancel)
+        SetEvent(g_player_cancel);
 
     if (g_play_thread) {
         DWORD wait_result = WaitForSingleObject(g_play_thread, 3000);
-        if (wait_result == WAIT_TIMEOUT)
-            TerminateThread(g_play_thread, 1);
-        CloseHandle(g_play_thread);
-        g_play_thread = NULL;
+        if (wait_result == WAIT_TIMEOUT) {
+            OutputDebugStringA("MacrosEngine: playback thread did not exit before timeout\n");
+        } else {
+            CloseHandle(g_play_thread);
+            g_play_thread = NULL;
+        }
     }
-    g_playing = false;
 }
 
 ENGINE_API void Engine_PausePlayback(void)
@@ -298,7 +366,20 @@ ENGINE_API bool Engine_IsPaused(void)
 
 void player_cleanup(void)
 {
+    if (g_play_thread) {
+        WaitForSingleObject(g_play_thread, 3000);
+        CloseHandle(g_play_thread);
+        g_play_thread = NULL;
+    }
     free(g_play_events);
     g_play_events = NULL;
     g_play_count  = 0;
+    g_playing = false;
+    g_paused = false;
+    g_stop_requested = false;
+
+    if (g_player_cancel) {
+        CloseHandle(g_player_cancel);
+        g_player_cancel = NULL;
+    }
 }
