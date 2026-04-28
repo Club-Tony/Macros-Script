@@ -58,6 +58,7 @@ class TrayMenuManager {
         m.Add("Playback Speed", speedMenu)
         m.Add("Loop Mode",      loopMenu)
         m.Add()
+        m.Add("Open Control Panel", (*) => MacroGuiToggle())
         m.Add("Open Macro Menu",  (*) => this._OpenMenu())
         dbgLabel := debugEnabled ? "Debug: ON  (Ctrl+Alt+D)" : "Debug: OFF (Ctrl+Alt+D)"
         m.Add(dbgLabel,           (*) => this._ToggleDebug())
@@ -86,15 +87,7 @@ class TrayMenuManager {
     }
 
     _LoadSlot(slotName) {
-        global slots, recorderEvents, recorder
-        events := slots.Load(slotName)
-        if (IsObject(events) && events.Length > 0) {
-            recorderEvents := events
-            recorder.slotName := slotName
-            ShowMacroToggledTip("Slot '" slotName "' loaded | F12 to play", 2000, false)
-            this.Rebuild()
-        } else
-            ShowMacroToggledTip("Slot '" slotName "' is empty", 2000, false)
+        LoadRecorderSlot(slotName)
     }
 
     _BuildSequencesMenu() {
@@ -202,6 +195,8 @@ class TrayMenuManager {
         global debugEnabled
         debugEnabled := !debugEnabled
         ShowMacroToggledTip("Debug mode " (debugEnabled ? "ON" : "OFF"), 2000, false)
+        if debugEnabled
+            ShowControllerDebugState()
         this.Rebuild()
     }
 }
