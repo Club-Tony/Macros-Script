@@ -14,4 +14,5 @@ public class MacroSettings
     public int LoopCount { get; set; } = 0; // 0 = infinite
     public int ThumbDeadzone { get; set; } = 7849;
     public int TriggerDeadzone { get; set; } = 30;
+    public int VJoyDeviceId { get; set; } = 1;
 }

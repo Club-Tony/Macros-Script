@@ -129,6 +129,16 @@ static SmokeResult RunSmoke(MainForm form, string workspaceRoot)
         NativeEngine.TryRecordMouseButton(down: true, button: 1);
         Thread.Sleep(25);
         NativeEngine.TryRecordMouseButton(down: false, button: 1);
+        Thread.Sleep(25);
+        NativeEngine.TryRecordControllerEvent(new ControllerState
+        {
+            Connected = true,
+            Buttons = 0x1000,
+            LeftTrigger = 16,
+            RightTrigger = 20,
+            LeftThumbX = 512,
+            LeftThumbY = -512
+        });
     }
     finally
     {

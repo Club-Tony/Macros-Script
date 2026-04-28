@@ -14,6 +14,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define XINPUT_GAMEPAD_A 0x1000
+
 /* ------- helpers ------- */
 
 static int  tests_run    = 0;
@@ -63,23 +65,34 @@ static void test_recording(void)
     CHECK(Engine_RecordMouseButton(false, 1),         "Record LButton up");
     CHECK(Engine_RecordMouseWheel(120),               "Record wheel up");
 
+    ControllerState pad;
+    memset(&pad, 0, sizeof(pad));
+    pad.connected = true;
+    pad.buttons = XINPUT_GAMEPAD_A;
+    pad.left_trigger = 24;
+    pad.left_thumb_x = 1024;
+    CHECK(Engine_RecordControllerEvent(&pad),         "Record controller event");
+
     Engine_StopRecording();
     CHECK(!Engine_IsRecording(), "IsRecording false after stop");
 
     uint32_t n = Engine_GetRecordedEventCount();
-    CHECK(n == 6, "Recorded event count == 6");
+    CHECK(n == 7, "Recorded event count == 7");
     printf("    recorded %u events\n", n);
 
     /* Retrieve events */
     MacroEvent buf[16];
     uint32_t got = 0;
     CHECK(Engine_GetRecordedEvents(buf, 16, &got), "GetRecordedEvents ok");
-    CHECK(got == 6, "Got 6 events back");
+    CHECK(got == 7, "Got 7 events back");
 
     /* Verify first event */
     CHECK(buf[0].type == EVENT_KEY_DOWN, "First event is KEY_DOWN");
     CHECK(buf[0].data.key.vk_code == 0x41, "First event VK == 0x41 (A)");
     CHECK(buf[0].timestamp_us >= 0, "Timestamp >= 0");
+    CHECK(buf[6].type == EVENT_CONTROLLER, "Last event is CONTROLLER");
+    CHECK(buf[6].data.controller.buttons == XINPUT_GAMEPAD_A,
+          "Controller event button state preserved");
 }
 
 static void test_file_io(void)
@@ -88,7 +101,7 @@ static void test_file_io(void)
     remove("test_output.txt");
 
     /* Create a small event set */
-    MacroEvent events[4];
+    MacroEvent events[5];
     memset(events, 0, sizeof(events));
 
     events[0].type = EVENT_MOUSE_MOVE;
@@ -108,14 +121,23 @@ static void test_file_io(void)
     events[3].timestamp_us = 141000;
     events[3].data.mouse_button.button = 1;
 
+    events[4].type = EVENT_CONTROLLER;
+    events[4].timestamp_us = 188000;
+    events[4].data.controller.connected = true;
+    events[4].data.controller.buttons = XINPUT_GAMEPAD_A;
+    events[4].data.controller.left_trigger = 12;
+    events[4].data.controller.right_trigger = 16;
+    events[4].data.controller.left_thumb_x = 256;
+    events[4].data.controller.left_thumb_y = -512;
+
     const char *path = "test_output.txt";
 
-    CHECK(Engine_SaveEventsToFile(path, events, 4), "SaveEventsToFile ok");
+    CHECK(Engine_SaveEventsToFile(path, events, 5), "SaveEventsToFile ok");
 
     /* Load them back */
     MacroEvent loaded[16];
     uint32_t n = Engine_LoadEventsFromFile(path, loaded, 16);
-    CHECK(n == 4, "LoadEventsFromFile returns 4");
+    CHECK(n == 5, "LoadEventsFromFile returns 5");
 
     CHECK(loaded[0].type == EVENT_MOUSE_MOVE, "Loaded[0] is MOUSE_MOVE");
     CHECK(loaded[0].data.mouse.x == 100, "Loaded[0] x == 100");
@@ -124,6 +146,9 @@ static void test_file_io(void)
     CHECK(loaded[1].type == EVENT_KEY_DOWN, "Loaded[1] is KEY_DOWN");
     CHECK(loaded[3].type == EVENT_MOUSE_DOWN, "Loaded[3] is MOUSE_DOWN");
     CHECK(loaded[3].data.mouse_button.button == 1, "Loaded[3] button == 1");
+    CHECK(loaded[4].type == EVENT_CONTROLLER, "Loaded[4] is CONTROLLER");
+    CHECK(loaded[4].data.controller.buttons == XINPUT_GAMEPAD_A,
+          "Loaded controller buttons preserved");
 
     /* Timing round-trip: delay between events should be ~47ms */
     int64_t d1 = (loaded[1].timestamp_us - loaded[0].timestamp_us) / 1000;
@@ -143,6 +168,8 @@ static void test_controller(void)
         return;
     }
     CHECK(started, "StartPolling succeeds");
+    CHECK(Engine_StartControllerRecording(), "StartControllerRecording succeeds");
+    CHECK(Engine_IsRecordingController(), "IsRecordingController true");
 
     /* Set custom deadzones */
     Engine_SetDeadzone(0, 8000, 30);
@@ -157,6 +184,8 @@ static void test_controller(void)
     }
 
     Engine_StopPolling();
+    Engine_StopControllerRecording();
+    CHECK(!Engine_IsRecordingController(), "IsRecordingController false after stop");
     CHECK(true, "StopPolling clean");
 }
 
@@ -189,6 +218,55 @@ static void test_playback_api(void)
 
     /* Should have finished by now */
     CHECK(!Engine_IsPlaying(), "IsPlaying false after completion");
+}
+
+static void test_playback_cancel(void)
+{
+    printf("\n[playback cancel]\n");
+
+    MacroEvent evts[1];
+    memset(evts, 0, sizeof(evts));
+    evts[0].type = EVENT_KEY_UP;
+    evts[0].timestamp_us = 10000000;  /* 10 seconds */
+    evts[0].data.key.vk_code = 0x41;
+
+    CHECK(Engine_StartPlayback(evts, 1, 0), "Start long playback ok");
+    CHECK(Engine_IsPlaying(), "Long playback reports playing");
+
+    DWORD start = GetTickCount();
+    Engine_StopPlayback();
+    DWORD elapsed = GetTickCount() - start;
+
+    CHECK(elapsed < 1000, "StopPlayback cancels wait promptly");
+    CHECK(!Engine_IsPlaying(), "IsPlaying false after cancellation");
+}
+
+static void test_vjoy_api(void)
+{
+    printf("\n[vJoy API]\n");
+
+    CHECK(Engine_SetVJoyDeviceId(1), "SetVJoyDeviceId accepts device 1");
+    CHECK(!Engine_SetVJoyDeviceId(0), "SetVJoyDeviceId rejects device 0");
+    CHECK(!Engine_SetVJoyDeviceId(17), "SetVJoyDeviceId rejects device 17");
+
+    VJoyState state;
+    memset(&state, 0, sizeof(state));
+    CHECK(Engine_GetVJoyState(&state), "GetVJoyState returns state");
+    printf("    available=%d enabled=%d ready=%d device=%u status=%u buttons=%u\n",
+           state.available, state.enabled, state.ready, state.device_id,
+           state.status, state.button_count);
+
+    MacroEvent evts[1];
+    memset(evts, 0, sizeof(evts));
+    evts[0].type = EVENT_CONTROLLER;
+    evts[0].timestamp_us = 0;
+    evts[0].data.controller.connected = true;
+    evts[0].data.controller.buttons = XINPUT_GAMEPAD_A;
+
+    CHECK(Engine_StartPlayback(evts, 1, 1),
+          "Controller playback starts with optional vJoy");
+    Sleep(100);
+    CHECK(!Engine_IsPlaying(), "Controller playback completes");
 }
 
 static void test_edge_cases(void)
@@ -243,6 +321,8 @@ int main(void)
     test_file_io();
     test_controller();
     test_playback_api();
+    test_playback_cancel();
+    test_vjoy_api();
     test_edge_cases();
     test_shutdown();
     test_uninit_safety();
