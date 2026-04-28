@@ -223,6 +223,28 @@ ENGINE_API bool Engine_RecordMouseWheel(int32_t delta)
     return ok;
 }
 
+ENGINE_API bool Engine_RecordControllerEvent(const ControllerState *state)
+{
+    if (!Engine_IsInitialized() || !state)
+        return false;
+
+    MacroEvent evt;
+    memset(&evt, 0, sizeof(evt));
+    evt.type = EVENT_CONTROLLER;
+    evt.data.controller = *state;
+    evt.data.controller.connected = true;
+
+    EnterCriticalSection(&g_engine_cs);
+    if (!g_recording) {
+        LeaveCriticalSection(&g_engine_cs);
+        return false;
+    }
+    evt.timestamp_us = timing_get_us() - g_start_us;
+    bool ok = push_event(&evt);
+    LeaveCriticalSection(&g_engine_cs);
+    return ok;
+}
+
 /* ================================================================
  * Cleanup (called by Engine_Shutdown)
  * ================================================================ */

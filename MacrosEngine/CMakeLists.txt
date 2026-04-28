@@ -4,7 +4,7 @@ project(MacrosEngine VERSION 1.0 LANGUAGES C)
 set(CMAKE_C_STANDARD 11)
 
 # Strict compiler warnings
-add_compile_options(-Wall -Wextra -Wpedantic -Wno-unused-parameter)
+add_compile_options(-Wall -Wextra -Wpedantic -Wno-unused-parameter -Wno-cast-function-type)
 
 add_library(MacrosEngine SHARED
     src/engine.c
@@ -12,6 +12,7 @@ add_library(MacrosEngine SHARED
     src/event_recorder.c
     src/event_player.c
     src/event_format.c
+    src/vjoy_output.c
     src/timing.c
 )
 

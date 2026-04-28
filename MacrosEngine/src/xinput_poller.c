@@ -37,6 +37,11 @@
 #define XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE 8689
 #define XINPUT_GAMEPAD_TRIGGER_THRESHOLD    30
 
+#define RECORDER_THUMB_DEADZONE   2500
+#define RECORDER_TRIGGER_DEADZONE 5
+#define RECORDER_THUMB_STEP       256
+#define RECORDER_TRIGGER_STEP     4
+
 #ifndef ERROR_DEVICE_NOT_CONNECTED
 #define ERROR_DEVICE_NOT_CONNECTED 1167
 #endif
@@ -72,9 +77,12 @@ static XInputGetState_t  g_XInputGetState = NULL;
 
 static HANDLE            g_poll_thread  = NULL;
 static volatile bool     g_poll_running = false;
+static volatile bool     g_controller_recording = false;
 static uint32_t          g_poll_interval_ms = 4;  /* ~250 Hz default */
 
 static ControllerState   g_states[MAX_PLAYERS];
+static ControllerState   g_record_prev_state;
+static bool              g_record_prev_valid = false;
 
 /* Per-player deadzones */
 static int16_t           g_thumb_deadzone[MAX_PLAYERS];
@@ -132,6 +140,103 @@ static void apply_deadzone(ControllerState *cs, uint32_t idx)
         cs->right_trigger = 0;
 }
 
+static int16_t quantize_thumb(int16_t value)
+{
+    int v = value;
+    if (v > -RECORDER_THUMB_DEADZONE && v < RECORDER_THUMB_DEADZONE)
+        v = 0;
+    int q = (v >= 0)
+        ? ((v + RECORDER_THUMB_STEP / 2) / RECORDER_THUMB_STEP) * RECORDER_THUMB_STEP
+        : -(((-v) + RECORDER_THUMB_STEP / 2) / RECORDER_THUMB_STEP) * RECORDER_THUMB_STEP;
+    if (q > 32767) q = 32767;
+    if (q < -32768) q = -32768;
+    return (int16_t)q;
+}
+
+static uint8_t quantize_trigger(uint8_t value)
+{
+    if (value < RECORDER_TRIGGER_DEADZONE)
+        return 0;
+    unsigned int q = ((unsigned int)value + RECORDER_TRIGGER_STEP / 2)
+        / RECORDER_TRIGGER_STEP * RECORDER_TRIGGER_STEP;
+    if (q > 255)
+        q = 255;
+    return (uint8_t)q;
+}
+
+static ControllerState normalize_for_recording(const ControllerState *state)
+{
+    ControllerState out = *state;
+    out.connected = true;
+    out.left_trigger = quantize_trigger(state->left_trigger);
+    out.right_trigger = quantize_trigger(state->right_trigger);
+    out.left_thumb_x = quantize_thumb(state->left_thumb_x);
+    out.left_thumb_y = quantize_thumb(state->left_thumb_y);
+    out.right_thumb_x = quantize_thumb(state->right_thumb_x);
+    out.right_thumb_y = quantize_thumb(state->right_thumb_y);
+    return out;
+}
+
+static bool states_equal(const ControllerState *a, const ControllerState *b)
+{
+    return a->buttons == b->buttons &&
+           a->left_trigger == b->left_trigger &&
+           a->right_trigger == b->right_trigger &&
+           a->left_thumb_x == b->left_thumb_x &&
+           a->left_thumb_y == b->left_thumb_y &&
+           a->right_thumb_x == b->right_thumb_x &&
+           a->right_thumb_y == b->right_thumb_y;
+}
+
+static bool state_is_neutral(const ControllerState *state)
+{
+    return state->buttons == 0 &&
+           state->left_trigger == 0 &&
+           state->right_trigger == 0 &&
+           state->left_thumb_x == 0 &&
+           state->left_thumb_y == 0 &&
+           state->right_thumb_x == 0 &&
+           state->right_thumb_y == 0;
+}
+
+static void maybe_record_controller_snapshot(void)
+{
+    if (!g_controller_recording)
+        return;
+
+    ControllerState sample;
+    memset(&sample, 0, sizeof(sample));
+    bool found = false;
+
+    EnterCriticalSection(&g_engine_cs);
+    for (uint32_t i = 0; i < MAX_PLAYERS; i++) {
+        if (g_states[i].connected) {
+            sample = g_states[i];
+            found = true;
+            break;
+        }
+    }
+    LeaveCriticalSection(&g_engine_cs);
+
+    if (!found)
+        return;
+
+    ControllerState normalized = normalize_for_recording(&sample);
+
+    if (!g_record_prev_valid) {
+        g_record_prev_state = normalized;
+        g_record_prev_valid = true;
+        if (!state_is_neutral(&normalized))
+            Engine_RecordControllerEvent(&normalized);
+        return;
+    }
+
+    if (!states_equal(&normalized, &g_record_prev_state)) {
+        g_record_prev_state = normalized;
+        Engine_RecordControllerEvent(&normalized);
+    }
+}
+
 /* ================================================================
  * Poll thread
  * ================================================================ */
@@ -164,6 +269,7 @@ static DWORD WINAPI poll_thread_proc(LPVOID param)
             LeaveCriticalSection(&g_engine_cs);
         }
 
+        maybe_record_controller_snapshot();
         Sleep(g_poll_interval_ms);
     }
     return 0;
@@ -186,9 +292,9 @@ ENGINE_API bool Engine_StartPolling(uint32_t interval_ms)
     /* Set default deadzones for any player that hasn't been configured */
     for (int i = 0; i < MAX_PLAYERS; i++) {
         if (g_thumb_deadzone[i] == 0)
-            g_thumb_deadzone[i] = XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE;
+            g_thumb_deadzone[i] = RECORDER_THUMB_DEADZONE;
         if (g_trigger_deadzone[i] == 0)
-            g_trigger_deadzone[i] = XINPUT_GAMEPAD_TRIGGER_THRESHOLD;
+            g_trigger_deadzone[i] = RECORDER_TRIGGER_DEADZONE;
     }
 
     g_poll_interval_ms = (interval_ms > 0) ? interval_ms : 4;
@@ -244,6 +350,41 @@ ENGINE_API void Engine_SetDeadzone(uint32_t player_index,
     LeaveCriticalSection(&g_engine_cs);
 }
 
+ENGINE_API bool Engine_StartControllerRecording(void)
+{
+    if (!Engine_IsInitialized())
+        return false;
+
+    if (!g_poll_running && !Engine_StartPolling(16))
+        return false;
+
+    EnterCriticalSection(&g_engine_cs);
+    g_record_prev_valid = false;
+    memset(&g_record_prev_state, 0, sizeof(g_record_prev_state));
+    g_controller_recording = true;
+    LeaveCriticalSection(&g_engine_cs);
+    return true;
+}
+
+ENGINE_API void Engine_StopControllerRecording(void)
+{
+    if (!Engine_IsInitialized())
+        return;
+
+    EnterCriticalSection(&g_engine_cs);
+    g_controller_recording = false;
+    g_record_prev_valid = false;
+    memset(&g_record_prev_state, 0, sizeof(g_record_prev_state));
+    LeaveCriticalSection(&g_engine_cs);
+}
+
+ENGINE_API bool Engine_IsRecordingController(void)
+{
+    if (!Engine_IsInitialized())
+        return false;
+    return g_controller_recording;
+}
+
 /* ================================================================
  * Cleanup (called by Engine_Shutdown)
  * ================================================================ */
@@ -256,4 +397,7 @@ void poller_cleanup(void)
         g_XInputGetState = NULL;
     }
     memset(g_states, 0, sizeof(g_states));
+    g_controller_recording = false;
+    g_record_prev_valid = false;
+    memset(&g_record_prev_state, 0, sizeof(g_record_prev_state));
 }

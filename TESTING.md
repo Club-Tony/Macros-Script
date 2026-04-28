@@ -27,6 +27,19 @@ All tests are manual (AHK v1 has no automated test framework). Run after each fe
 
 ## Feature Checklists
 
+### Native MacrosApp Controller + vJoy Parity
+- [ ] Run `MacrosEngine/build-x64/test_engine.exe` → all native tests pass
+- [ ] Run `dotnet run --project MacrosApp/tools/MacrosApp.Smoke/MacrosApp.Smoke.csproj` → smoke test passes
+- [ ] Record a mixed keyboard + mouse + controller slot in MacrosApp → saved event file contains `C|` controller rows
+- [ ] Restart MacrosApp → saved mixed slot is still listed and playable
+- [ ] Play an AHK v1-recorded controller slot in MacrosApp → vJoy output moves in `joy.cpl`
+- [ ] Set `vJoyDeviceId=2` in the active profile → MacrosApp routes controller playback to device 2
+- [ ] Disable or uninstall vJoy → MacrosApp playback status warns that vJoy is unavailable and does not crash
+- [ ] Start a long or infinite playback → stop it → playback exits promptly and no `TerminateThread` warning appears
+- [ ] End-to-end parity: compare a 60-second mixed MacrosApp recording against the same AHK v1 workflow
+
+---
+
 ### Feature 1: Named Slots + .ini Persistence
 - [ ] Save unnamed slot (hit Enter at name prompt) → saved as `untitled`
 - [ ] Save named slot → appears in tray menu immediately

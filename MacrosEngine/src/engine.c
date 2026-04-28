@@ -21,6 +21,8 @@ static volatile LONG g_cs_init_state = 0;
 extern void poller_cleanup(void);
 extern void recorder_cleanup(void);
 extern void player_cleanup(void);
+extern bool player_init(void);
+extern void vjoy_cleanup(void);
 
 /* Ensure the critical section is initialized exactly once (MinGW-safe) */
 static void ensure_cs_initialized(void)
@@ -54,6 +56,10 @@ ENGINE_API bool Engine_Init(void)
     }
 
     timing_init();
+    if (!player_init()) {
+        LeaveCriticalSection(&g_engine_cs);
+        return false;
+    }
     InterlockedExchange(&g_initialized, 1);
 
     LeaveCriticalSection(&g_engine_cs);
@@ -77,6 +83,7 @@ ENGINE_API void Engine_Shutdown(void)
 
     /* Stop active operations while still "initialized" so their
      * Engine_IsInitialized() guards pass */
+    Engine_StopControllerRecording();
     Engine_StopPolling();
     Engine_StopPlayback();
     Engine_StopRecording();
@@ -87,6 +94,7 @@ ENGINE_API void Engine_Shutdown(void)
     poller_cleanup();
     recorder_cleanup();
     player_cleanup();
+    vjoy_cleanup();
     timing_cleanup();
 
     /* Note: we intentionally do NOT DeleteCriticalSection here.

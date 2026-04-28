@@ -1,6 +1,6 @@
 # Native Engine — Stretch Items from Completed Plan
 
-**Status:** Planned
+**Status:** In Progress (code complete 2026-04-28; manual live parity gate pending)
 **Created:** 2026-04-24
 **Goal:** Implement the three deferred items the `native-controller-dll.md` plan called out as out-of-scope when it was marked complete on 2026-04-23.
 
@@ -17,6 +17,22 @@ Three items in the original plan's "Deferred" list are now eligible for follow-u
 1. **Controller event recording in the engine** — `xinput_poller.c` does not yet emit `EVENT_CONTROLLER` records into `event_recorder.c`'s circular buffer. C# UI never sees controller events back from the engine.
 2. **vJoy playback** — `MacrosEngine/src/event_player.c:163` drops `EVENT_CONTROLLER` events at playback time with `OutputDebugStringA("MacrosEngine: EVENT_CONTROLLER skipped (vJoy not implemented)\n")`.
 3. **Playback-thread shutdown hardening** — current shutdown still relies on `TerminateThread` timeout fallback per the completed plan's note. Should be replaced with a cooperative cancellation event.
+
+## Implementation Update — 2026-04-28
+
+- E1, E2, and E3 are implemented in the native engine and MacrosApp wrapper.
+- Automated verification now covers controller event recording/injection, controller event file round-trip, long playback cancellation, optional vJoy state/playback, app build, and the WinForms smoke record→persist→playback→Idle flow.
+- Verified commands: `MacrosEngine/build-x64/test_engine.exe` passed 66/66, `dotnet build MacrosApp/MacrosApp/MacrosApp.csproj` passed with 0 warnings/errors, and `dotnet run --project MacrosApp/tools/MacrosApp.Smoke/MacrosApp.Smoke.csproj` passed with 6 saved events and final Idle state.
+- vJoy was available and ready on the test machine during the native vJoy API test. No live controller was connected during the automated controller polling sample.
+- Remaining work is the live parity gate: exercise a real mixed keyboard + mouse + controller recording through MacrosApp, verify vJoy output in `joy.cpl`, and compare against AHK v1 behavior on real hardware.
+
+## Remaining Acceptance Gate
+
+- Record a real mixed keyboard + mouse + controller macro in MacrosApp and confirm the saved event file contains `C|` controller rows.
+- Restart MacrosApp and replay that mixed slot through vJoy; confirm output in `joy.cpl`.
+- Load an AHK v1-recorded controller slot in MacrosApp and confirm controller playback maps through vJoy with no skipped-controller log messages.
+- Temporarily run without vJoy available and confirm MacrosApp warns clearly while staying stable.
+- After those manual checks pass, move this plan to `Plans/Completed/`.
 
 ## Solution / Scope
 

@@ -17,6 +17,20 @@ public struct ControllerState
     public byte LeftTrigger, RightTrigger;
 }
 
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+public struct VJoyState
+{
+    [MarshalAs(UnmanagedType.I1)] public bool Available;
+    [MarshalAs(UnmanagedType.I1)] public bool Enabled;
+    [MarshalAs(UnmanagedType.I1)] public bool Ready;
+    public uint DeviceId;
+    public uint Status;
+    public uint ButtonCount;
+    public uint ContPovCount;
+    public uint DiscPovCount;
+    public uint AxisExistsMask;
+}
+
 public static class NativeEngine
 {
     private const string DllName = "MacrosEngine.dll";
@@ -87,6 +101,17 @@ public static class NativeEngine
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     public static extern void Engine_SetDeadzone(uint playerIndex, short thumbDeadzone, byte triggerDeadzone);
 
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Engine_StartControllerRecording();
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Engine_StopControllerRecording();
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Engine_IsRecordingController();
+
     // ================================================================
     // Recording
     // ================================================================
@@ -127,6 +152,10 @@ public static class NativeEngine
     [return: MarshalAs(UnmanagedType.I1)]
     public static extern bool Engine_RecordMouseWheel(int delta);
 
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Engine_RecordControllerEvent(ref ControllerState state);
+
     // ================================================================
     // Playback
     // ================================================================
@@ -151,6 +180,18 @@ public static class NativeEngine
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     [return: MarshalAs(UnmanagedType.I1)]
     public static extern bool Engine_IsPaused();
+
+    // ================================================================
+    // vJoy output
+    // ================================================================
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Engine_SetVJoyDeviceId(uint deviceId);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Engine_GetVJoyState(out VJoyState state);
 
     // ================================================================
     // Event file I/O
@@ -206,6 +247,26 @@ public static class NativeEngine
     {
         if (!IsAvailable) return;
         try { Engine_StopPolling(); } catch { }
+    }
+
+    public static bool TryStartControllerRecording()
+    {
+        if (!IsAvailable) return false;
+        try { return Engine_StartControllerRecording(); }
+        catch { return false; }
+    }
+
+    public static void TryStopControllerRecording()
+    {
+        if (!IsAvailable) return;
+        try { Engine_StopControllerRecording(); } catch { }
+    }
+
+    public static bool TryIsRecordingController()
+    {
+        if (!IsAvailable) return false;
+        try { return Engine_IsRecordingController(); }
+        catch { return false; }
     }
 
     public static bool TryStartRecording()
@@ -301,6 +362,14 @@ public static class NativeEngine
         catch { return false; }
     }
 
+    public static bool TryRecordControllerEvent(ControllerState state)
+    {
+        if (!IsAvailable) return false;
+        state.Connected = true;
+        try { return Engine_RecordControllerEvent(ref state); }
+        catch { return false; }
+    }
+
     public static bool TryStartPlayback(IntPtr events, uint count, uint loopCount)
     {
         if (!IsAvailable) return false;
@@ -338,6 +407,21 @@ public static class NativeEngine
     {
         if (!IsAvailable) return;
         try { Engine_ResumePlayback(); } catch { }
+    }
+
+    public static bool TrySetVJoyDeviceId(uint deviceId)
+    {
+        if (!IsAvailable) return false;
+        try { return Engine_SetVJoyDeviceId(deviceId); }
+        catch { return false; }
+    }
+
+    public static bool TryGetVJoyState(out VJoyState state)
+    {
+        state = default;
+        if (!IsAvailable) return false;
+        try { return Engine_GetVJoyState(out state); }
+        catch { return false; }
     }
 
     public static bool TrySaveEventsToFile(string path, IntPtr events, uint count)

@@ -220,6 +220,12 @@ public partial class MainForm : Form
         string profileName = active?.Name ?? profiles.FirstOrDefault()?.Name ?? "Default";
         profileStatusLabel.Text = $"Profile: {profileName}";
 
+        var effectiveProfile = active ?? profiles.FirstOrDefault();
+        if (effectiveProfile != null)
+        {
+            _settings.VJoyDeviceId = Math.Clamp(effectiveProfile.VJoyDeviceId, 1, 16);
+        }
+
         // Apply profile settings if detected
         if (active != null)
         {
@@ -255,6 +261,8 @@ public partial class MainForm : Form
 
         if (NativeEngine.IsAvailable && NativeEngine.TryInit())
         {
+            NativeEngine.TrySetVJoyDeviceId((uint)_settings.VJoyDeviceId);
+
             if (NativeEngine.TryStartPolling(16))
             {
                 controllerState.StartRefresh();
@@ -554,12 +562,21 @@ public partial class MainForm : Form
             SetState(MacroState.Idle, "Engine unavailable");
             return;
         }
+        NativeEngine.TrySetVJoyDeviceId((uint)_settings.VJoyDeviceId);
 
         string eventPath = _slotManager.GetEventFilePath(slot.Name);
         if (!File.Exists(eventPath))
         {
             SetState(MacroState.Idle, $"Missing events: {slot.Name}");
             return;
+        }
+
+        bool hasControllerEvents = SlotHasControllerEvents(eventPath);
+        bool vJoyReadyForController = true;
+        if (hasControllerEvents)
+        {
+            vJoyReadyForController =
+                NativeEngine.TryGetVJoyState(out var vJoyState) && vJoyState.Ready;
         }
 
         if (!NativeEngine.TryLoadPlaybackBuffer(eventPath, out var buffer, out uint count))
@@ -583,12 +600,36 @@ public partial class MainForm : Form
             }
 
             _slotPlaybackActive = true;
-            SetState(MacroState.Playing, $"Playing: {slot.Name}");
+            string status = hasControllerEvents && !vJoyReadyForController
+                ? $"Playing: {slot.Name} (vJoy unavailable)"
+                : $"Playing: {slot.Name}";
+            SetState(MacroState.Playing, status);
         }
         finally
         {
             NativeEngine.FreePlaybackBuffer(buffer);
         }
+    }
+
+    private static bool SlotHasControllerEvents(string eventPath)
+    {
+        try
+        {
+            foreach (var rawLine in File.ReadLines(eventPath))
+            {
+                var line = rawLine.TrimStart();
+                if (line.StartsWith("C|", StringComparison.Ordinal))
+                    return true;
+            }
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+
+        return false;
     }
 
     private void CancelCurrentOperation()
@@ -922,6 +963,7 @@ public partial class MainForm : Form
     {
         if (!NativeEngine.TryInit() || !NativeEngine.TryStartRecording())
             return false;
+        NativeEngine.TryStartControllerRecording();
 
         DisposeRecordingHook();
 
@@ -934,6 +976,7 @@ public partial class MainForm : Form
         if (!hook.Start())
         {
             hook.Dispose();
+            NativeEngine.TryStopControllerRecording();
             NativeEngine.TryStopRecording();
             return false;
         }
@@ -946,6 +989,7 @@ public partial class MainForm : Form
     private void FinalizeRecording()
     {
         DisposeRecordingHook();
+        NativeEngine.TryStopControllerRecording();
         NativeEngine.TryStopRecording();
 
         _activeMacroType = null;
