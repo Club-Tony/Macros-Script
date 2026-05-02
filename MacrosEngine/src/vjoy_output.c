@@ -189,6 +189,14 @@ static bool load_vjoy_library(void)
 
     g_load_attempted = true;
 
+    /* Test seam: MACROS_DISABLE_VJOY forces the not-available branch so the
+     * vJoy-missing graceful-degrade path can be exercised on a vJoy-equipped
+     * dev box. See test_vjoy_disabled() in test_engine.c. */
+    if (GetEnvironmentVariableA("MACROS_DISABLE_VJOY", NULL, 0) > 0) {
+        g_state.available = false;
+        return false;
+    }
+
     char value[MAX_PATH];
     char path[MAX_PATH];
 

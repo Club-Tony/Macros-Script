@@ -113,6 +113,24 @@ static SmokeResult RunSmoke(MainForm form, string workspaceRoot)
         return SmokeResult.Fail(slotName, "Native engine was not available.", workspaceRoot);
     }
 
+    // B. vJoy state surface check: confirms the SetVJoyDeviceId / GetVJoyState
+    // P/Invoke wrappers round-trip without throwing. Catches marshalling
+    // regressions before the manual gate. We do not assert state.Available
+    // because that depends on whether vJoy is installed on the host.
+    if (!NativeEngine.TrySetVJoyDeviceId(1))
+    {
+        return SmokeResult.Fail(slotName, "TrySetVJoyDeviceId(1) returned false.", workspaceRoot);
+    }
+    if (!NativeEngine.TryGetVJoyState(out VJoyState vjoyState))
+    {
+        return SmokeResult.Fail(slotName, "TryGetVJoyState returned false.", workspaceRoot);
+    }
+    if (vjoyState.DeviceId != 1)
+    {
+        return SmokeResult.Fail(slotName, $"VJoyState.DeviceId expected 1, got {vjoyState.DeviceId}.", workspaceRoot);
+    }
+    Console.WriteLine($"vjoy_available={vjoyState.Available} vjoy_ready={vjoyState.Ready} vjoy_status={vjoyState.Status}");
+
     if (!NativeEngine.TryStartRecording())
     {
         return SmokeResult.Fail(slotName, "Native engine recording could not start.", workspaceRoot);
@@ -176,6 +194,35 @@ static SmokeResult RunSmoke(MainForm form, string workspaceRoot)
     {
         return SmokeResult.Fail(slotName, "Saved slot data was not written to disk.", workspaceRoot);
     }
+
+    // A. Assert the persisted file actually contains the controller event we
+    // recorded. event_format.c writes them as: C|buttons|lt|rt|lx|ly|rx|ry|delay
+    // (9 pipe-separated tokens). A regression that silently dropped controller
+    // writes wouldn't fail any other assertion in this harness.
+    string[] eventLines = File.ReadAllLines(eventPath);
+    string? controllerLine = eventLines.FirstOrDefault(
+        l => l.StartsWith("C|", StringComparison.Ordinal));
+    if (controllerLine == null)
+    {
+        return SmokeResult.Fail(slotName,
+            "Persisted event file has no C| controller row. Lines: " +
+            string.Join(" / ", eventLines),
+            workspaceRoot);
+    }
+    string[] controllerTokens = controllerLine.Split('|');
+    if (controllerTokens.Length != 9)
+    {
+        return SmokeResult.Fail(slotName,
+            $"Controller row had {controllerTokens.Length} tokens, expected 9: {controllerLine}",
+            workspaceRoot);
+    }
+    if (controllerTokens[1] != "4096" /* 0x1000 = A button */)
+    {
+        return SmokeResult.Fail(slotName,
+            $"Controller row buttons expected 4096, got {controllerTokens[1]}: {controllerLine}",
+            workspaceRoot);
+    }
+    Console.WriteLine("controller_row=" + controllerLine);
 
     var settingsField = typeof(MainForm).GetField(
         "_settings",
