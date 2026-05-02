@@ -26,6 +26,26 @@ Three items in the original plan's "Deferred" list are now eligible for follow-u
 - vJoy was available and ready on the test machine during the native vJoy API test. No live controller was connected during the automated controller polling sample.
 - Remaining work is the live parity gate: exercise a real mixed keyboard + mouse + controller recording through MacrosApp, verify vJoy output in `joy.cpl`, and compare against AHK v1 behavior on real hardware.
 
+## Pre-Manual Automation Update — 2026-05-02
+
+Additional pre-manual automation landed to shrink the manual gate. Reference: `~/.claude/plans/5-serene-gizmo.md`.
+
+- Native engine suite expanded **66 → 96 passing checks** in `MacrosEngine/build-x64/test_engine.exe`.
+- New separate suite **`test_xinput_diff.exe`: 37/37 passing** for the pure controller-state diff helpers (quantize, normalize, equality, neutrality, multi-field diff scenarios).
+- Additions:
+  - `test_playback_cancel_midsleep` (5 checks) — cancels during inter-event sleep, asserts return within 1s.
+  - `test_ahk_v1_format` (19 checks) — loads `MacrosEngine/test/fixtures/ahk_v1_mixed.txt` and round-trips key/mouse/controller rows through `Engine_LoadEventsFromFile`, then plays back through the engine API.
+  - `test_vjoy_disabled` (5 checks) — uses the new `MACROS_DISABLE_VJOY=1` env-var seam in `vjoy_output.c` to exercise the no-vJoy graceful path on a vJoy-equipped box.
+  - `MacrosApp.Smoke` now asserts the persisted slot file contains a `C|...` row with the expected button bytes, and that `TrySetVJoyDeviceId(1)` + `TryGetVJoyState` round-trip without throwing.
+- Refactor: extracted `quantize_thumb`, `quantize_trigger`, `normalize_for_recording`, `states_equal`, `state_is_neutral` from `xinput_poller.c` into a new `MacrosEngine/src/xinput_diff.h` (`static inline`) so the new test TU can include them without dragging in the engine exports.
+
+What still needs human eyes (true manual gate):
+
+- Real-stick parity feel with a physical Xbox/PS4 controller.
+- Observable vJoy output in `joy.cpl` Properties visualizer during playback.
+- Side-by-side AHK v1 vs MacrosApp playback with an AHK-v1-recorded controller slot.
+- MacrosApp UI behavior when launched with `MACROS_DISABLE_VJOY=1` — engine no-crash is automated; the *visible UI warning* for the user is what's left.
+
 ## Remaining Acceptance Gate
 
 - Record a real mixed keyboard + mouse + controller macro in MacrosApp and confirm the saved event file contains `C|` controller rows.
