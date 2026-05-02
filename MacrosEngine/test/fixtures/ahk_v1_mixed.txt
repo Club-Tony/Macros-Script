@@ -1,0 +1,22 @@
+; AHK v1 pipe-delimited mixed-event fixture used by test_ahk_v1_format()
+; in test_engine.c. Format documented in src/event_format.c.
+;   key|name|Down/Up|delay_ms
+;   mousebtn|button|Down/Up|delay_ms
+;   M|x|y|delay_ms
+;   C|buttons|lt|rt|lx|ly|rx|ry|delay_ms
+;
+; The delays form cumulative timestamps in microseconds:
+;   row 0:    0 ms
+;   row 1:   25 ms
+;   row 2:   75 ms
+;   row 3:  125 ms
+;   row 4:  175 ms
+;   row 5:  225 ms
+;   row 6:  275 ms
+key|a|Down|0
+key|a|Up|25
+M|320|240|50
+mousebtn|LButton|Down|50
+mousebtn|LButton|Up|50
+C|4096|16|20|512|-512|0|0|50
+C|0|0|0|0|0|0|0|50

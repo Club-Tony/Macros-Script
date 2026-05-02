@@ -16,6 +16,12 @@
 
 #define XINPUT_GAMEPAD_A 0x1000
 
+/* Fixture directory is normally injected by CMake. Fall back to a relative
+ * path for the case where the test is run directly without the build system. */
+#ifndef MACROS_TEST_FIXTURE_DIR
+#define MACROS_TEST_FIXTURE_DIR "test/fixtures"
+#endif
+
 /* ------- helpers ------- */
 
 static int  tests_run    = 0;
@@ -241,6 +247,36 @@ static void test_playback_cancel(void)
     CHECK(!Engine_IsPlaying(), "IsPlaying false after cancellation");
 }
 
+static void test_playback_cancel_midsleep(void)
+{
+    printf("\n[playback cancel mid-sleep]\n");
+
+    /* Two events with a 5-second gap. Cancel after the first has dispatched
+     * but while the player is sleeping inside that gap. Exercises the E3
+     * cooperative-cancel path through the inter-event wait. */
+    MacroEvent evts[2];
+    memset(evts, 0, sizeof(evts));
+    evts[0].type = EVENT_KEY_UP;
+    evts[0].timestamp_us = 0;
+    evts[0].data.key.vk_code = 0x41;
+    evts[1].type = EVENT_KEY_UP;
+    evts[1].timestamp_us = 5000000;   /* 5 seconds after event 0 */
+    evts[1].data.key.vk_code = 0x42;
+
+    CHECK(Engine_StartPlayback(evts, 2, 0), "Start mid-sleep playback ok");
+    CHECK(Engine_IsPlaying(), "Mid-sleep playback reports playing");
+
+    Sleep(250);   /* land squarely inside the 5-second gap */
+    CHECK(Engine_IsPlaying(), "Still playing 250ms in (mid-sleep)");
+
+    DWORD start = GetTickCount();
+    Engine_StopPlayback();
+    DWORD elapsed = GetTickCount() - start;
+
+    CHECK(elapsed < 1000, "Mid-sleep cancel returns within 1s");
+    CHECK(!Engine_IsPlaying(), "IsPlaying false after mid-sleep cancel");
+}
+
 static void test_vjoy_api(void)
 {
     printf("\n[vJoy API]\n");
@@ -267,6 +303,99 @@ static void test_vjoy_api(void)
           "Controller playback starts with optional vJoy");
     Sleep(100);
     CHECK(!Engine_IsPlaying(), "Controller playback completes");
+}
+
+static void test_ahk_v1_format(void)
+{
+    printf("\n[AHK v1 format round-trip]\n");
+
+    /* Load the hand-written AHK v1 fixture and confirm the parser extracts
+     * each event type with the expected fields. Then play it back through
+     * the engine API to confirm the load->playback path works end-to-end
+     * without a real controller or vJoy device. */
+    const char *fixture = MACROS_TEST_FIXTURE_DIR "/ahk_v1_mixed.txt";
+
+    MacroEvent loaded[16];
+    memset(loaded, 0, sizeof(loaded));
+    uint32_t n = Engine_LoadEventsFromFile(fixture, loaded, 16);
+    CHECK(n == 7, "Fixture loads 7 events");
+    if (n != 7) {
+        printf("    SKIP remaining (loaded %u events; fixture path = %s)\n",
+               n, fixture);
+        return;
+    }
+
+    CHECK(loaded[0].type == EVENT_KEY_DOWN,    "row 0 KEY_DOWN");
+    CHECK(loaded[1].type == EVENT_KEY_UP,      "row 1 KEY_UP");
+    CHECK(loaded[2].type == EVENT_MOUSE_MOVE,  "row 2 MOUSE_MOVE");
+    CHECK(loaded[2].data.mouse.x == 320 && loaded[2].data.mouse.y == 240,
+          "row 2 mouse coords (320, 240)");
+    CHECK(loaded[3].type == EVENT_MOUSE_DOWN,  "row 3 MOUSE_DOWN");
+    CHECK(loaded[3].data.mouse_button.button == 1, "row 3 LButton (=1)");
+    CHECK(loaded[4].type == EVENT_MOUSE_UP,    "row 4 MOUSE_UP");
+    CHECK(loaded[5].type == EVENT_CONTROLLER,  "row 5 CONTROLLER");
+    CHECK(loaded[5].data.controller.buttons == 4096, "row 5 buttons == 4096 (X)");
+    CHECK(loaded[5].data.controller.left_trigger == 16, "row 5 LT == 16");
+    CHECK(loaded[5].data.controller.right_trigger == 20, "row 5 RT == 20");
+    CHECK(loaded[5].data.controller.left_thumb_x == 512, "row 5 LX == 512");
+    CHECK(loaded[5].data.controller.left_thumb_y == -512, "row 5 LY == -512");
+    CHECK(loaded[6].type == EVENT_CONTROLLER,  "row 6 CONTROLLER (release)");
+    CHECK(loaded[6].data.controller.buttons == 0, "row 6 buttons cleared");
+
+    /* Cumulative timing: row 1 should sit 25 ms after row 0, row 6 at 275 ms. */
+    int64_t d01 = (loaded[1].timestamp_us - loaded[0].timestamp_us) / 1000;
+    int64_t d06 = (loaded[6].timestamp_us - loaded[0].timestamp_us) / 1000;
+    CHECK(d01 == 25, "delay row0->row1 = 25 ms");
+    CHECK(d06 == 275, "delay row0->row6 = 275 ms");
+
+    /* Compress the timestamps so playback finishes in well under a second.
+     * Original spacing was 25-50ms each; rescale to ~1ms per step. */
+    for (uint32_t i = 0; i < n; i++)
+        loaded[i].timestamp_us /= 50;
+
+    CHECK(Engine_StartPlayback(loaded, n, 1), "Playback of fixture starts");
+    Sleep(300);
+    CHECK(!Engine_IsPlaying(), "Fixture playback completes cleanly");
+}
+
+static void test_vjoy_disabled(void)
+{
+    printf("\n[vJoy disabled via env var]\n");
+
+    /* Force the not-available branch even if vJoy is installed locally.
+     * MacrosApp's acceptance gate item #4 ('temporarily run without vJoy')
+     * is otherwise unreachable on a vJoy-equipped dev box. */
+    if (!SetEnvironmentVariableA("MACROS_DISABLE_VJOY", "1")) {
+        printf("    SKIP  could not set MACROS_DISABLE_VJOY\n");
+        return;
+    }
+
+    /* Re-init so vjoy_output's load_vjoy_library() runs fresh and observes
+     * the env var. The engine resets its g_load_attempted/g_state on
+     * Engine_Shutdown -> Engine_Init via vjoy_reset() in Engine_Init. */
+    Engine_Shutdown();
+    CHECK(Engine_Init(), "Engine_Init succeeds with MACROS_DISABLE_VJOY=1");
+
+    VJoyState state;
+    memset(&state, 0, sizeof(state));
+    Engine_GetVJoyState(&state);
+    CHECK(!state.available, "GetVJoyState reports not available");
+    CHECK(!state.ready, "GetVJoyState reports not ready");
+
+    /* Playback of a controller event should drop the event but not crash. */
+    MacroEvent evts[1];
+    memset(evts, 0, sizeof(evts));
+    evts[0].type = EVENT_CONTROLLER;
+    evts[0].timestamp_us = 0;
+    evts[0].data.controller.connected = true;
+    evts[0].data.controller.buttons = XINPUT_GAMEPAD_A;
+
+    CHECK(Engine_StartPlayback(evts, 1, 1),
+          "Controller playback starts even without vJoy");
+    Sleep(100);
+    CHECK(!Engine_IsPlaying(), "Controller playback completes without vJoy");
+
+    SetEnvironmentVariableA("MACROS_DISABLE_VJOY", NULL);
 }
 
 static void test_edge_cases(void)
@@ -322,7 +451,10 @@ int main(void)
     test_controller();
     test_playback_api();
     test_playback_cancel();
+    test_playback_cancel_midsleep();
     test_vjoy_api();
+    test_ahk_v1_format();
+    test_vjoy_disabled();
     test_edge_cases();
     test_shutdown();
     test_uninit_safety();

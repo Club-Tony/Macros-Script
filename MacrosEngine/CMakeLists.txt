@@ -33,3 +33,13 @@ target_link_options(MacrosEngine PRIVATE -static -static-libgcc)
 # Test executable
 add_executable(test_engine test/test_engine.c)
 target_link_libraries(test_engine PRIVATE MacrosEngine kernel32)
+target_compile_definitions(test_engine PRIVATE
+    MACROS_TEST_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test/fixtures"
+)
+
+# XInput diff helper unit tests (uses #include "../src/xinput_poller.c"
+# directly so the static helpers are reachable). Linked against MacrosEngine
+# only for the Engine_*/CRITICAL_SECTION extern declarations.
+add_executable(test_xinput_diff test/test_xinput_diff.c)
+target_link_libraries(test_xinput_diff PRIVATE MacrosEngine kernel32)
+target_compile_definitions(test_xinput_diff PRIVATE MACROS_XINPUT_DIFF_TEST)
