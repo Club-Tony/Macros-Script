@@ -7,3 +7,7 @@ MacrosEngine/build-*/
 MacrosApp/**/bin/
 MacrosApp/**/obj/
 tests/live/artifacts/
+macros_events/Delete Grok Files.txt
+macros_events/test.txt
+macros_events/test.txt
+macros_events/y.txt
