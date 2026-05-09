@@ -659,16 +659,12 @@ GuiSlotDDLChange:
 return
 
 GuiLoadSlot:
-    global recorderEvents, recorder
     Gui, MacroGui:Submit, NoHide
     GuiControlGet, selectedSlot,, GuiSlotDDL
     if (selectedSlot = "")
         return
-    events := SlotLoad(selectedSlot)
-    if (IsObject(events) && events.MaxIndex() > 0)
+    if (LoadRecorderSlot(selectedSlot))
     {
-        recorderEvents := events
-        recorder.slotName := selectedSlot
         ShowMacroToggledTip("Slot '" selectedSlot "' loaded | F12 to play", 2000, false)
         MacroGuiRefresh()
         TrayMenuRebuild()
@@ -771,12 +767,8 @@ GuiSlotListLoad:
 return
 
 GuiSlotListLoadByName:
-    global recorderEvents, recorder
-    events := SlotLoad(slotName)
-    if (IsObject(events) && events.MaxIndex() > 0)
+    if (LoadRecorderSlot(slotName))
     {
-        recorderEvents := events
-        recorder.slotName := slotName
         ShowMacroToggledTip("Slot '" slotName "' loaded | F12 to play", 2000, false)
         MacroGuiRefresh()
         TrayMenuRebuild()
@@ -830,10 +822,16 @@ GuiSlotListRename:
         ShowMacroToggledTip("Cannot rename -- slot '" oldName "' has no events", 2000, false)
         return
     }
-    ; Read coord mode from ini
-    iniPath := A_ScriptDir "\macros.ini"
-    IniRead, coordMode, %iniPath%, %oldName%, coord_mode, screen
-    SlotSave(newName, events, coordMode)
+    metadata := SlotLoadMetadata(oldName, events)
+    SlotSave(
+        newName,
+        events,
+        metadata.coordMode,
+        metadata.hasControllerEvents,
+        metadata.targetExe,
+        metadata.targetClientW,
+        metadata.targetClientH
+    )
     SlotDelete(oldName)
     MacroGuiRefreshSlotList()
     MacroGuiRefreshMainTab()

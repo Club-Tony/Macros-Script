@@ -14,9 +14,9 @@
 
 ; Save current recorderEvents to a named slot.
 ; Creates/updates macros.ini metadata and macros_events/<name>.txt event data.
-SlotSave(slotName, events, coordMode := "screen")
+SlotSave(slotName, events, coordMode := "screen", hasControllerEvents := "", targetExe := "", targetClientW := "", targetClientH := "")
 {
-    global debugEnabled
+    global debugEnabled, recorderHasControllerEvents, recorderTargetExe, recorderTargetClientW, recorderTargetClientH
     iniPath    := A_ScriptDir "\macros.ini"
     backupPath := A_ScriptDir "\macros.ini.bak"
     eventsDir  := A_ScriptDir "\macros_events"
@@ -68,9 +68,24 @@ SlotSave(slotName, events, coordMode := "screen")
         IniWrite, %slotName%, %iniPath%, Slots, slot_%newIndex%
     }
 
+    if (hasControllerEvents = "")
+        hasControllerEvents := SlotEventsHaveController(events) ? 1 : 0
+    else
+        hasControllerEvents := hasControllerEvents ? 1 : 0
+    if (coordMode = "client" && targetExe = "")
+        targetExe := recorderTargetExe
+    if (coordMode = "client" && targetClientW = "")
+        targetClientW := recorderTargetClientW
+    if (coordMode = "client" && targetClientH = "")
+        targetClientH := recorderTargetClientH
+
     ; Write slot-specific metadata
     IniWrite, %eventCount%, %iniPath%, %slotName%, event_count
     IniWrite, %coordMode%, %iniPath%, %slotName%, coord_mode
+    IniWrite, %hasControllerEvents%, %iniPath%, %slotName%, has_controller
+    IniWrite, %targetExe%, %iniPath%, %slotName%, target_exe
+    IniWrite, %targetClientW%, %iniPath%, %slotName%, target_client_w
+    IniWrite, %targetClientH%, %iniPath%, %slotName%, target_client_h
     FormatTime, nowStr,, yyyy-MM-dd
     IniWrite, %nowStr%, %iniPath%, %slotName%, recorded
 
@@ -125,6 +140,37 @@ SlotLoad(slotName)
         ShowMacroToggledTip("DEBUG: SlotLoad skipped " badLines " bad lines in '" slotName "'", 2000, false)
 
     return events
+}
+
+SlotEventsHaveController(events)
+{
+    if (!IsObject(events))
+        return false
+    for _, evt in events
+    {
+        if (IsObject(evt) && evt.type = "controller")
+            return true
+    }
+    return false
+}
+
+SlotLoadMetadata(slotName, events := "")
+{
+    iniPath := A_ScriptDir "\macros.ini"
+    meta := {}
+    IniRead, coordMode, %iniPath%, %slotName%, coord_mode, screen
+    IniRead, hasController, %iniPath%, %slotName%, has_controller, ""
+    IniRead, targetExe, %iniPath%, %slotName%, target_exe, ""
+    IniRead, targetClientW, %iniPath%, %slotName%, target_client_w, 0
+    IniRead, targetClientH, %iniPath%, %slotName%, target_client_h, 0
+    if (hasController = "")
+        hasController := SlotEventsHaveController(events) ? 1 : 0
+    meta.coordMode := coordMode
+    meta.hasControllerEvents := hasController ? 1 : 0
+    meta.targetExe := targetExe
+    meta.targetClientW := targetClientW + 0
+    meta.targetClientH := targetClientH + 0
+    return meta
 }
 
 ; Delete a named slot from disk and remove from macros.ini index.
@@ -219,10 +265,18 @@ SlotExportAll()
         iniPath := A_ScriptDir "\macros.ini"
         IniRead, eventCount, %iniPath%, %name%, event_count, 0
         IniRead, coordMode,  %iniPath%, %name%, coord_mode, screen
+        IniRead, hasController, %iniPath%, %name%, has_controller, 0
+        IniRead, targetExe, %iniPath%, %name%, target_exe, ""
+        IniRead, targetClientW, %iniPath%, %name%, target_client_w, 0
+        IniRead, targetClientH, %iniPath%, %name%, target_client_h, 0
         IniRead, recorded,   %iniPath%, %name%, recorded, ""
         FileAppend, [%name%]`n, %exportPath%
         FileAppend, event_count=%eventCount%`n, %exportPath%
         FileAppend, coord_mode=%coordMode%`n, %exportPath%
+        FileAppend, has_controller=%hasController%`n, %exportPath%
+        FileAppend, target_exe=%targetExe%`n, %exportPath%
+        FileAppend, target_client_w=%targetClientW%`n, %exportPath%
+        FileAppend, target_client_h=%targetClientH%`n, %exportPath%
         FileAppend, recorded=%recorded%`n, %exportPath%
 
         ; Write events inline under a sub-key
@@ -293,6 +347,10 @@ SlotImportAll()
         ; Read this slot's metadata
         IniRead, eventCount, %importPath%, %sectionName%, event_count, 0
         IniRead, coordMode,  %importPath%, %sectionName%, coord_mode, screen
+        IniRead, hasController, %importPath%, %sectionName%, has_controller, 0
+        IniRead, targetExe, %importPath%, %sectionName%, target_exe, ""
+        IniRead, targetClientW, %importPath%, %sectionName%, target_client_w, 0
+        IniRead, targetClientH, %importPath%, %sectionName%, target_client_h, 0
         IniRead, recorded,   %importPath%, %sectionName%, recorded, ""
 
         ; Collect event lines
@@ -376,6 +434,10 @@ SlotImportAll()
             evtCount := 0
         IniWrite, %evtCount%, %iniPath%, %finalName%, event_count
         IniWrite, %coordMode%, %iniPath%, %finalName%, coord_mode
+        IniWrite, %hasController%, %iniPath%, %finalName%, has_controller
+        IniWrite, %targetExe%, %iniPath%, %finalName%, target_exe
+        IniWrite, %targetClientW%, %iniPath%, %finalName%, target_client_w
+        IniWrite, %targetClientH%, %iniPath%, %finalName%, target_client_h
         IniWrite, %recorded%, %iniPath%, %finalName%, recorded
 
         imported++

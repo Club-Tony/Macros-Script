@@ -292,6 +292,81 @@ ToggleRecorderPlayback()
     }
 }
 
+LoadRecorderSlot(slotName)
+{
+    global recorderEvents, recorder
+    global recorderMouseCoordSpace, recorderTargetHwnd, recorderTargetExe, recorderTargetClientW, recorderTargetClientH
+    global recorderHasControllerEvents
+
+    events := SlotLoad(slotName)
+    if (!IsObject(events) || events.MaxIndex() = "")
+        return false
+
+    metadata := SlotLoadMetadata(slotName, events)
+    recorderEvents := events
+    recorder.slotName := slotName
+    recorderMouseCoordSpace := metadata.coordMode
+    recorderTargetHwnd := 0
+    recorderTargetExe := metadata.targetExe
+    recorderTargetClientW := metadata.targetClientW
+    recorderTargetClientH := metadata.targetClientH
+    recorderHasControllerEvents := metadata.hasControllerEvents ? true : false
+    return true
+}
+
+PlayRecordedEvent(evt, playbackMeta, ByRef errorMessage)
+{
+    global recorderMouseCoordSpace, recorderTargetExe
+
+    errorMessage := ""
+    if (!IsObject(evt))
+        return true
+
+    coordSpace := (IsObject(playbackMeta) && playbackMeta.coordMode != "") ? playbackMeta.coordMode : recorderMouseCoordSpace
+    targetExe := (IsObject(playbackMeta) && playbackMeta.targetExe != "") ? playbackMeta.targetExe : recorderTargetExe
+
+    if (evt.type = "key")
+    {
+        SendEventOrInput("{" evt.code " " evt.state "}")
+    }
+    else if (evt.type = "mousebtn")
+    {
+        if (evt.state != "")
+            SendEventOrInput("{" evt.code " " evt.state "}")
+        else
+            SendEventOrInput("{" evt.code "}")
+    }
+    else if (evt.type = "mousemove")
+    {
+        CoordMode, Mouse, Screen
+        if (coordSpace = "client")
+        {
+            WinGet, activeExe, ProcessName, A
+            if (activeExe = "" || activeExe != targetExe)
+            {
+                errorMessage := "Playback stopped (focus lost: " targetExe ")"
+                return false
+            }
+            hwnd := WinExist("A")
+            if (!hwnd || !Recorder_ClientToScreen(hwnd, evt.x, evt.y, sx, sy))
+            {
+                errorMessage := "Playback stopped (client coords conversion failed)"
+                return false
+            }
+            MouseMove, %sx%, %sy%, 0
+        }
+        else
+        {
+            MouseMove, % evt.x, % evt.y, 0
+        }
+    }
+    else if (evt.type = "controller")
+    {
+        ControllerApplyStateToVJoy(evt.state)
+    }
+    return true
+}
+
 MenuTimeout:
     CloseMenu("timeout")
 return
@@ -327,6 +402,7 @@ SequencePlayStep:
         SetTimer, SequencePlayStep, -10
         return
     }
+    stepMeta := SlotLoadMetadata(slotName, events)
 
     ; Play events inline (single-threaded -- Sleep yields to hotkey threads for Esc)
     speedFactor := (IsObject(recorder) && recorder.speed > 0) ? recorder.speed : 1.0
@@ -340,17 +416,12 @@ SequencePlayStep:
             Sleep, %scaledDelay%
         if (!sequence.playing)
             break
-        if (evt.type = "key" || evt.type = "mousebtn")
+        if (!PlayRecordedEvent(evt, stepMeta, playbackError))
         {
-            if (evt.state = "down")
-                SendEventOrInput("{" evt.code " down}")
-            else
-                SendEventOrInput("{" evt.code " up}")
+            SequenceStop()
+            ShowMacroToggledTip(playbackError, 3000, false)
+            return
         }
-        else if (evt.type = "mousemove")
-            MouseMove, % evt.x, % evt.y, 0
-        else if (evt.type = "controller")
-            ControllerApplyStateToVJoy(evt.state)
     }
 
     if (sequence.playing)
@@ -1488,47 +1559,11 @@ RecorderPlayNext:
             recorderPlayIndex := idx
             return
         }
-        if (evt.type = "key")
+        if (!PlayRecordedEvent(evt, "", playbackError))
         {
-            SendEventOrInput("{" evt.code " " evt.state "}")
-        }
-        else if (evt.type = "mousebtn")
-        {
-            if (evt.state != "")
-                SendEventOrInput("{" evt.code " " evt.state "}")
-            else
-                SendEventOrInput("{" evt.code "}")
-        }
-        else if (evt.type = "mousemove")
-        {
-            ; Ensure screen coordinates for MouseMove regardless of global CoordMode
-            CoordMode, Mouse, Screen
-            if (recorderMouseCoordSpace = "client")
-            {
-                WinGet, activeExe, ProcessName, A
-                if (activeExe = "" || activeExe != recorderTargetExe)
-                {
-                    StopPlayback(true)
-                    ShowMacroToggledTip("Playback stopped (focus lost: " recorderTargetExe ")", 3000, false)
-                    return
-                }
-                hwnd := WinExist("A")
-                if (!hwnd || !Recorder_ClientToScreen(hwnd, evt.x, evt.y, sx, sy))
-                {
-                    StopPlayback(true)
-                    ShowMacroToggledTip("Playback stopped (client coords conversion failed)", 3000, false)
-                    return
-                }
-                MouseMove, %sx%, %sy%, 0
-            }
-            else
-            {
-                MouseMove, % evt.x, % evt.y, 0
-            }
-        }
-        else if (evt.type = "controller")
-        {
-            ControllerApplyStateToVJoy(evt.state)
+            StopPlayback(true)
+            ShowMacroToggledTip(playbackError, 3000, false)
+            return
         }
         idx++
     }
