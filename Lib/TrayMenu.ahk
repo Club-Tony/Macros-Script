@@ -239,12 +239,8 @@ return
 TraySlotActivate:
     ; A_ThisMenuItem contains the slot name that was clicked
     slotName := A_ThisMenuItem
-    events := SlotLoad(slotName)
-    if (IsObject(events) && events.MaxIndex() > 0)
+    if (LoadRecorderSlot(slotName))
     {
-        global recorderEvents, recorder
-        recorderEvents := events
-        recorder.slotName := slotName
         ShowMacroToggledTip("Slot '" slotName "' loaded | F12 to play", 2000, false)
         TrayMenuRebuild()
     }
