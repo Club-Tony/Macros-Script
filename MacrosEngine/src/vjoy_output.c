@@ -13,6 +13,14 @@
 #include <stdint.h>
 #include <string.h>
 
+/* Older MinGW headers may omit the WOW64 registry view flags. */
+#ifndef KEY_WOW64_64KEY
+#define KEY_WOW64_64KEY 0x0100
+#endif
+#ifndef KEY_WOW64_32KEY
+#define KEY_WOW64_32KEY 0x0200
+#endif
+
 extern CRITICAL_SECTION g_engine_cs;
 
 #define VJD_MAXDEV      16

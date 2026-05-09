@@ -12,9 +12,8 @@
  * converted back to inter-event delays in milliseconds.
  *
  * Key codes:  The AHK format stores key *names* (e.g. "a", "Space",
- * "LShift", "vkBC").  When reading we store a hash of the name string
- * in vk_code as a round-trip identifier; the actual VK lookup would
- * happen on the AHK side.  For "vkXX" names we parse the hex value
+ * "LShift", "vkBC").  When reading we map common AHK key names to
+ * Windows virtual-key codes.  For "vkXX" names we parse the hex value
  * directly.
  *
  * Mouse button names:  "LButton"=1, "RButton"=2, "MButton"=3,
@@ -35,16 +34,33 @@
  * Helpers
  * ================================================================ */
 
-/* Simple hash for key-name round-tripping */
-static uint16_t hash_keyname(const char *s)
+static bool equals_ci(const char *a, const char *b)
 {
-    uint32_t h = 5381;
-    while (*s)
-        h = ((h << 5) + h) + (uint8_t)*s++;
-    return (uint16_t)(h & 0xFFFF);
+    return lstrcmpiA(a, b) == 0;
 }
 
-/* Parse "vkXX" hex notation.  Returns parsed value or hash fallback. */
+static bool starts_with_ci(const char *s, const char *prefix)
+{
+    while (*prefix) {
+        if (tolower((unsigned char)*s) != tolower((unsigned char)*prefix))
+            return false;
+        s++;
+        prefix++;
+    }
+    return true;
+}
+
+static bool parse_int_range(const char *s, int min_value, int max_value, int *out)
+{
+    char *end = NULL;
+    long value = strtol(s, &end, 10);
+    if (!s[0] || (end && *end) || value < min_value || value > max_value)
+        return false;
+    *out = (int)value;
+    return true;
+}
+
+/* Parse AHK key names to Windows VK codes. */
 static uint16_t parse_vk(const char *name)
 {
     if ((name[0] == 'v' || name[0] == 'V') &&
@@ -54,7 +70,59 @@ static uint16_t parse_vk(const char *name)
         if (sscanf(name + 2, "%x", &val) == 1)
             return (uint16_t)val;
     }
-    return hash_keyname(name);
+
+    if (name[0] && !name[1]) {
+        SHORT vk = VkKeyScanA(name[0]);
+        if (vk != -1)
+            return (uint16_t)(vk & 0xFF);
+    }
+
+    int number = 0;
+    if ((name[0] == 'F' || name[0] == 'f') && parse_int_range(name + 1, 1, 24, &number))
+        return (uint16_t)(VK_F1 + number - 1);
+    if (starts_with_ci(name, "Numpad") && parse_int_range(name + 6, 0, 9, &number))
+        return (uint16_t)(VK_NUMPAD0 + number);
+
+    if (equals_ci(name, "Space")) return VK_SPACE;
+    if (equals_ci(name, "Tab")) return VK_TAB;
+    if (equals_ci(name, "Enter")) return VK_RETURN;
+    if (equals_ci(name, "NumpadEnter")) return VK_RETURN;
+    if (equals_ci(name, "Esc") || equals_ci(name, "Escape")) return VK_ESCAPE;
+    if (equals_ci(name, "Backspace") || equals_ci(name, "BS")) return VK_BACK;
+    if (equals_ci(name, "Delete") || equals_ci(name, "Del")) return VK_DELETE;
+    if (equals_ci(name, "Insert") || equals_ci(name, "Ins")) return VK_INSERT;
+    if (equals_ci(name, "Home")) return VK_HOME;
+    if (equals_ci(name, "End")) return VK_END;
+    if (equals_ci(name, "PgUp") || equals_ci(name, "PageUp")) return VK_PRIOR;
+    if (equals_ci(name, "PgDn") || equals_ci(name, "PageDown")) return VK_NEXT;
+    if (equals_ci(name, "Up")) return VK_UP;
+    if (equals_ci(name, "Down")) return VK_DOWN;
+    if (equals_ci(name, "Left")) return VK_LEFT;
+    if (equals_ci(name, "Right")) return VK_RIGHT;
+    if (equals_ci(name, "Shift")) return VK_SHIFT;
+    if (equals_ci(name, "LShift")) return VK_LSHIFT;
+    if (equals_ci(name, "RShift")) return VK_RSHIFT;
+    if (equals_ci(name, "Ctrl") || equals_ci(name, "Control")) return VK_CONTROL;
+    if (equals_ci(name, "LCtrl") || equals_ci(name, "LControl")) return VK_LCONTROL;
+    if (equals_ci(name, "RCtrl") || equals_ci(name, "RControl")) return VK_RCONTROL;
+    if (equals_ci(name, "Alt")) return VK_MENU;
+    if (equals_ci(name, "LAlt")) return VK_LMENU;
+    if (equals_ci(name, "RAlt")) return VK_RMENU;
+    if (equals_ci(name, "LWin")) return VK_LWIN;
+    if (equals_ci(name, "RWin")) return VK_RWIN;
+    if (equals_ci(name, "AppsKey") || equals_ci(name, "Apps")) return VK_APPS;
+    if (equals_ci(name, "CapsLock")) return VK_CAPITAL;
+    if (equals_ci(name, "NumLock")) return VK_NUMLOCK;
+    if (equals_ci(name, "ScrollLock")) return VK_SCROLL;
+    if (equals_ci(name, "PrintScreen")) return VK_SNAPSHOT;
+    if (equals_ci(name, "Pause")) return VK_PAUSE;
+    if (equals_ci(name, "NumpadDot")) return VK_DECIMAL;
+    if (equals_ci(name, "NumpadDiv")) return VK_DIVIDE;
+    if (equals_ci(name, "NumpadMult")) return VK_MULTIPLY;
+    if (equals_ci(name, "NumpadAdd")) return VK_ADD;
+    if (equals_ci(name, "NumpadSub")) return VK_SUBTRACT;
+
+    return 0;
 }
 
 /* Map AHK mouse-button name to numeric id */
@@ -225,14 +293,9 @@ ENGINE_API uint32_t Engine_LoadEventsFromFile(const char  *path,
  * ================================================================ */
 
 /*
- * Key-name round-trip table.  Since we only store a hash in vk_code
- * on load, saving back requires an external name.  For events recorded
- * via the C API (Engine_RecordKeyEvent) the caller provides a VK code;
- * we write it as "vkXX" hex so AHK can parse it.
- *
- * When loading files that were originally saved by AHK and then
- * round-tripped through the C engine, the key names will change to
- * hex notation.  This is acceptable because AHK supports both.
+ * Key-name round-trip table.  Loaded AHK events preserve key_name,
+ * while events recorded through the C API may only have a VK code.  In
+ * that case we write "vkXX" hex so AHK can parse it.
  */
 
 ENGINE_API bool Engine_SaveEventsToFile(const char       *path,
