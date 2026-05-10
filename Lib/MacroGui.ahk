@@ -34,9 +34,6 @@ MacroGuiCreate()
     if (macroGuiCreated)
         return
 
-    ; Load saved position
-    MacroGuiLoadPosition(guiX, guiY)
-
     ; -- Window shell
     Gui, MacroGui:New, +HwndMacroGuiHwnd +Resize -MaximizeBox, Macros-Script
     Gui, MacroGui:Default
@@ -215,13 +212,13 @@ MacroGuiShow()
     if (!macroGuiCreated)
         MacroGuiCreate()
     MacroGuiRefresh()
-    ; Load saved position
-    MacroGuiLoadPosition(guiX, guiY)
+    MacroGuiResolveShowPosition(guiX, guiY)
     if (guiX != "" && guiY != "")
         Gui, MacroGui:Show, x%guiX% y%guiY% NoActivate
     else
         Gui, MacroGui:Show, NoActivate
     macroGuiVisible := true
+    MacroGuiSavePosition()
 }
 
 MacroGuiHide()
@@ -550,6 +547,7 @@ MacroGuiSavePosition()
     WinGetPos, gx, gy
     if (gx = "" || gy = "")
         return
+    MacroGuiClampPosition(gx, gy)
     iniPath := A_ScriptDir "\macros.ini"
     IniWrite, %gx%, %iniPath%, GuiState, x
     IniWrite, %gy%, %iniPath%, GuiState, y
@@ -564,6 +562,102 @@ MacroGuiLoadPosition(ByRef outX, ByRef outY)
         outX := ""
     if (outY = "ERROR")
         outY := ""
+}
+
+MacroGuiResolveShowPosition(ByRef outX, ByRef outY)
+{
+    MacroGuiLoadPosition(outX, outY)
+    if (outX != "" && outY != "")
+    {
+        outX += 0
+        outY += 0
+        MacroGuiClampPosition(outX, outY)
+    }
+    else
+    {
+        MacroGuiCenterOnPrimary(outX, outY)
+    }
+}
+
+MacroGuiClampPosition(ByRef x, ByRef y)
+{
+    MacroGuiGetWindowSize(guiW, guiH)
+
+    SysGet, monitorCount, MonitorCount
+    if (monitorCount = "")
+        monitorCount := 0
+
+    Loop, %monitorCount%
+    {
+        SysGet, work, MonitorWorkArea, %A_Index%
+        if (x >= workLeft && x < workRight && y >= workTop && y < workBottom)
+        {
+            MacroGuiClampToWorkArea(x, y, guiW, guiH, workLeft, workTop, workRight, workBottom)
+            return
+        }
+    }
+
+    MacroGuiCenterOnPrimary(x, y)
+}
+
+MacroGuiCenterOnPrimary(ByRef outX, ByRef outY)
+{
+    MacroGuiGetWindowSize(guiW, guiH)
+
+    SysGet, primaryMonitor, MonitorPrimary
+    if (primaryMonitor = "")
+        primaryMonitor := 1
+
+    SysGet, work, MonitorWorkArea, %primaryMonitor%
+    if (workRight = "" || workBottom = "")
+    {
+        outX := ""
+        outY := ""
+        return
+    }
+
+    workW := workRight - workLeft
+    workH := workBottom - workTop
+    outX := workLeft + Floor((workW - guiW) / 2)
+    outY := workTop + Floor((workH - guiH) / 2)
+    MacroGuiClampToWorkArea(outX, outY, guiW, guiH, workLeft, workTop, workRight, workBottom)
+}
+
+MacroGuiClampToWorkArea(ByRef x, ByRef y, guiW, guiH, workLeft, workTop, workRight, workBottom)
+{
+    margin := 8
+    minX := workLeft + margin
+    minY := workTop + margin
+    maxX := workRight - guiW - margin
+    maxY := workBottom - guiH - margin
+
+    if (maxX < minX)
+        maxX := minX
+    if (maxY < minY)
+        maxY := minY
+
+    if (x < minX)
+        x := minX
+    else if (x > maxX)
+        x := maxX
+
+    if (y < minY)
+        y := minY
+    else if (y > maxY)
+        y := maxY
+}
+
+MacroGuiGetWindowSize(ByRef outW, ByRef outH)
+{
+    outW := 420
+    outH := 460
+
+    Gui, MacroGui:+LastFound
+    WinGetPos, , , measuredW, measuredH
+    if (measuredW != "" && measuredW > 0)
+        outW := measuredW
+    if (measuredH != "" && measuredH > 0)
+        outH := measuredH
 }
 
 ; ============================================================
@@ -823,15 +917,7 @@ GuiSlotListRename:
         return
     }
     metadata := SlotLoadMetadata(oldName, events)
-    SlotSave(
-        newName,
-        events,
-        metadata.coordMode,
-        metadata.hasControllerEvents,
-        metadata.targetExe,
-        metadata.targetClientW,
-        metadata.targetClientH
-    )
+    SlotSave(newName, events, metadata.coordMode, metadata.hasControllerEvents, metadata.targetExe, metadata.targetClientW, metadata.targetClientH)
     SlotDelete(oldName)
     MacroGuiRefreshSlotList()
     MacroGuiRefreshMainTab()
