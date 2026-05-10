@@ -826,8 +826,8 @@ CloseMenu(reason := "", skipReload := false) {
 
 ; ── Recorder / playback / sequence core ─────────────────────────────────────
 ; Keyboard/mouse recorder, playback engine, and sequence chaining.
-; NOTE: Controller recording (RecorderSampleController) and vJoy playback are
-; NOT yet ported — see Plans/v2-port-completion.md.
+; Controller recording and vJoy playback are implemented; live parity remains
+; tracked in Plans/v2-port-completion.md.
 
 StartRecorder(mode := "combined", suppressCombo := false, mouseCoordSpace := "screen") {
     global recorderActive, recorderPlaying, recorderEvents, recorderStart, recorderLast
@@ -1362,7 +1362,7 @@ SequencePlayStep(*) {
     }
 }
 
-; ── Stubs for features needing full port (autoclicker, hold macros, etc.) ─────
+; ── Feature helpers ──────────────────────────────────────────────────────────
 
 ActivateClickMacro() {
     global clickMacroOn

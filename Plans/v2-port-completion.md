@@ -1,6 +1,6 @@
 # AHK v2 Port Completion
 
-**Status:** In Progress (implementation complete 2026-04-28; live controller/vJoy verification pending)
+**Status:** In Progress (implementation and parse smoke complete 2026-05-09; live controller/vJoy verification pending)
 **Created:** 2026-04-24
 **Goal:** Bring `Macros_v2.ahk` + `Lib_v2/` to feature parity with `Macros.ahk` + `Lib/`.
 
@@ -28,6 +28,13 @@ Reactivated 2026-04-28 by explicit user request to proceed with the AHK v2 plan 
 - Updated sequence playback so slots with wheel-style mouse events and controller events replay correctly through the sequence runner.
 - Validation so far: `AutoHotkey.exe /ErrorStdOut=UTF-8 /iLib '*' Macros_v2.ahk` exits 0, and a hidden startup smoke run produced no stderr. Live controller and vJoy behavior still needs hardware verification.
 
+## Verification Update - 2026-05-09
+
+- Ran `C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe /ErrorStdOut=UTF-8 /iLib '*' Macros_v2.ahk`; exit code 0.
+- Confirmed vJoy is installed under `C:\Program Files\vJoy\`, but did not perform live controller/vJoy output verification in this session.
+- Removed stale `Macros_v2.ahk` comments that still described controller recording and vJoy playback as unported.
+- This plan remains active until the manual controller/vJoy parity gate is exercised.
+
 ## What v2 currently has
 
 - F1 slash macro, F2 autoclicker (fully ported)
@@ -40,7 +47,7 @@ Reactivated 2026-04-28 by explicit user request to proceed with the AHK v2 plan 
 - F3 Turbo Hold and F4 Pure Hold setup/toggle flows
 - 4-tab MacroGui panel (Lib_v2/MacroGui.ahk)
 
-## What v2 is missing
+## Historical starting gaps
 
 | Component | v1 size | v2 size | Status |
 |-----------|---------|---------|--------|
@@ -54,6 +61,20 @@ Reactivated 2026-04-28 by explicit user request to proceed with the AHK v2 plan 
 | Pure Hold (F4) | embedded in `Macros.ahk` | stub | `Macros_v2.ahk:634` — toast only |
 
 2026-04-28 implementation note: the historical table above still reflects the plan's starting gap analysis for some rows. Current code now includes MacroGui, VJoy, controller polling, Turbo Hold, and Pure Hold implementations; the remaining open item is live hardware verification with an XInput controller and vJoy.
+
+## Current parity status
+
+| Component | Status |
+|-----------|--------|
+| `Lib_v2/MacroGui.ahk` | Implemented - 4-tab GUI panel for Main, Slots, Sequences, and Settings |
+| `Lib_v2/Recorder_Keys.ahk` | Implemented - v2 `#HotIf` pass-through map for keyboard/mouse recording |
+| `Lib_v2/XInput.ahk` | Implemented - DllCall/Buffer wrapper plus debug state readout |
+| `Lib_v2/VJoy_lib.ahk` | Implemented - vJoy device, axis, button, and POV wrapper |
+| `Lib_v2/Debug.ahk` | Implemented - `DebugTip()` / `DebugLog()` helpers |
+| Controller polling loop | Implemented - `ControllerComboPoll()` plus L1+L2+R1+R2 combos |
+| Turbo Hold (F3) | Implemented - keyboard and controller binding flow |
+| Pure Hold (F4) | Implemented - keyboard and controller binding flow |
+| Live controller/vJoy round-trip | Pending manual hardware verification |
 
 ## Solution / Scope
 
