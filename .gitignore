@@ -6,3 +6,4 @@ MacrosApp/**/obj/
 tests/live/artifacts/
 macros.ini
 macros_events/*.txt
+macros.ini.bak
