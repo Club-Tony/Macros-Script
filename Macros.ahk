@@ -180,7 +180,7 @@ ToggleDebugHotkey()
     global debugEnabled
     debugEnabled := !debugEnabled
     TrayMenuRebuild()
-    ShowMacroToggledTip("Debug mode " (debugEnabled ? "ON" : "OFF"), 2000, false)
+    ShowMacroToggledTip("Macros: Debug mode " (debugEnabled ? "ON" : "OFF"), 2000, false)
 }
 
 ; Ctrl+Shift+Alt+Z toggles the GUI panel (replaces old tooltip menu)
