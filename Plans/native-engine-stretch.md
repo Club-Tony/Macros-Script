@@ -46,6 +46,20 @@ What still needs human eyes (true manual gate):
 - Side-by-side AHK v1 vs MacrosApp playback with an AHK-v1-recorded controller slot.
 - MacrosApp UI behavior when launched with `MACROS_DISABLE_VJOY=1` — engine no-crash is automated; the *visible UI warning* for the user is what's left.
 
+## Live Hardware Triage - 2026-05-17
+
+- DS4Windows was observed exposing the PS4 controller as a virtual X360/XInput device, and direct PowerShell XInput probing saw live changing stick values.
+- The AHK v1 `Lib/XInput.ahk` wrapper initially read neutral values because `GetProcAddress` calls did not declare a `ptr` return type on 64-bit AutoHotkey. This truncated function pointers before `XInputGetState` calls.
+- Fixed the AHK v1 wrapper signatures and confirmed an AHK probe can now read live XInput stick changes through `xinput1_4.dll`.
+- vJoy availability still looks technically healthy from the native/MacrosEngine side, but the previous `zz_controller_smoke` slot is not a valid controller playback proof because it contains only mouse events and no `C|` controller rows.
+
+Remaining post-fix manual gate:
+
+1. Reload `Macros.ahk` so the patched XInput wrapper is active.
+2. Record a fresh AHK v1 controller slot and confirm the saved event file contains `C|` rows.
+3. Replay that slot while watching vJoy Monitor or `joy.cpl` and confirm axes/buttons move.
+4. Only after that passes, repeat the MacrosApp native parity checks below and archive this plan.
+
 ## Remaining Acceptance Gate
 
 - Record a real mixed keyboard + mouse + controller macro in MacrosApp and confirm the saved event file contains `C|` controller rows.

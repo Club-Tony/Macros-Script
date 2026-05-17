@@ -212,21 +212,26 @@ MacroGuiShow()
     if (!macroGuiCreated)
         MacroGuiCreate()
     MacroGuiRefresh()
-    MacroGuiResolveShowPosition(guiX, guiY)
+    MacroGuiResolveShowPosition(guiX, guiY, positionAdjusted)
     if (guiX != "" && guiY != "")
-        Gui, MacroGui:Show, x%guiX% y%guiY% NoActivate
+        Gui, MacroGui:Show, x%guiX% y%guiY% Restore
     else
-        Gui, MacroGui:Show, NoActivate
+        Gui, MacroGui:Show, Restore
+    Gui, MacroGui:+LastFound
+    WinActivate
     macroGuiVisible := true
-    MacroGuiSavePosition()
+    if (positionAdjusted)
+        MacroGuiSavePosition()
 }
 
 MacroGuiHide()
 {
     global macroGuiVisible
-    MacroGuiSavePosition()
+    Gui, MacroGui:+LastFound
+    WinGetPos, gx, gy
     Gui, MacroGui:Hide
     macroGuiVisible := false
+    MacroGuiSavePosition(gx, gy)
 }
 
 MacroGuiToggle()
@@ -537,14 +542,16 @@ MacroGuiUpdateStatus()
 ; POSITION PERSISTENCE
 ; ============================================================
 
-MacroGuiSavePosition()
+MacroGuiSavePosition(gx := "", gy := "")
 {
     global macroGuiCreated
     if (!macroGuiCreated)
         return
-    ; Get window position
-    Gui, MacroGui:+LastFound
-    WinGetPos, gx, gy
+    if (gx = "" || gy = "")
+    {
+        Gui, MacroGui:+LastFound
+        WinGetPos, gx, gy
+    }
     if (gx = "" || gy = "")
         return
     MacroGuiClampPosition(gx, gy)
@@ -564,18 +571,25 @@ MacroGuiLoadPosition(ByRef outX, ByRef outY)
         outY := ""
 }
 
-MacroGuiResolveShowPosition(ByRef outX, ByRef outY)
+MacroGuiResolveShowPosition(ByRef outX, ByRef outY, ByRef outAdjusted)
 {
+    outAdjusted := false
     MacroGuiLoadPosition(outX, outY)
     if (outX != "" && outY != "")
     {
         outX += 0
         outY += 0
+        originalX := outX
+        originalY := outY
         MacroGuiClampPosition(outX, outY)
+        if (outX != originalX || outY != originalY)
+            outAdjusted := true
     }
     else
     {
         MacroGuiCenterOnPrimary(outX, outY)
+        if (outX != "" && outY != "")
+            outAdjusted := true
     }
 }
 
