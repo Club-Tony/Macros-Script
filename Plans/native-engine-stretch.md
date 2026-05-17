@@ -53,17 +53,25 @@ What still needs human eyes (true manual gate):
 - Fixed the AHK v1 wrapper signatures and confirmed an AHK probe can now read live XInput stick changes through `xinput1_4.dll`.
 - vJoy availability still looks technically healthy from the native/MacrosEngine side, but the previous `zz_controller_smoke` slot is not a valid controller playback proof because it contains only mouse events and no `C|` controller rows.
 
-Remaining post-fix manual gate:
+AHK v1 baseline status after reload:
 
-1. Reload `Macros.ahk` so the patched XInput wrapper is active.
-2. Record a fresh AHK v1 controller slot and confirm the saved event file contains `C|` rows.
-3. Replay that slot while watching vJoy Monitor or `joy.cpl` and confirm axes/buttons move.
-4. Only after that passes, repeat the MacrosApp native parity checks below and archive this plan.
+- **Tentatively complete for desktop/vJoy parity.** `Macros.ahk` was reloaded with the patched XInput wrapper active.
+- Keyboard/mouse recording and playback were previously exercised with `zz_smoke_v1_kbm` and passed.
+- A fresh controller slot, `zz_controller_xinput_pass`, saved with `has_controller=1`, `event_count=264`, and 74 `C|` controller rows.
+- Replaying `zz_controller_xinput_pass` through AHK v1 moved vJoy successfully, and MacrosApp also replayed that AHK v1 slot through vJoy successfully.
+- Caveat: this has not yet been proven inside an actual game. The current evidence is vJoy/desktop-level parity, not in-game behavior under a target title.
+
+WinForms observation pass:
+
+- `MacrosApp.exe` opens cleanly into the dark WinForms UI with status `Idle`, top-level macro buttons, settings, controller panel, `Engine: loaded`, and `Profile: Default`.
+- The controller viewer is present and wired as a read-only XInput status panel.
+- When launched directly from `MacrosApp/MacrosApp/bin/Debug/net8.0-windows`, the Saved Recordings list appeared empty. The code resolves the repo root by walking up from the executable path and then falling back to the current directory, so launch context affects whether repo-root `macros.ini` slots are visible. No C# changes were made because Claude is actively working on this area.
 
 ## Remaining Acceptance Gate
 
 - Record a real mixed keyboard + mouse + controller macro in MacrosApp and confirm the saved event file contains `C|` controller rows.
 - Restart MacrosApp and replay that mixed slot through vJoy; confirm output in `joy.cpl`.
+- Run the AHK v1 controller macro in a real target game and confirm the target sees the intended controller behavior, not only vJoy movement.
 - Load an AHK v1-recorded controller slot in MacrosApp and confirm controller playback maps through vJoy with no skipped-controller log messages.
 - Temporarily run without vJoy available and confirm MacrosApp warns clearly while staying stable.
 - After those manual checks pass, move this plan to `Plans/Completed/`.
