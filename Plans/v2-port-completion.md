@@ -108,3 +108,14 @@ Each sub-plan should:
 4. Confirm cross-compatibility — slots recorded in v1 should still play back in v2.
 
 End-to-end final-acceptance: a recording made on v1 plays back on v2 byte-identically across all event types, and v2 can record + save + replay with full controller + vJoy round-trip.
+
+## Automated Verification Run - 2026-05-16
+
+Unattended auto-test sweep (no live hardware). Tooling: AutoHotkey64 v2.0.18.
+
+- **Verification step 2 — AHK v2 parse/syntax check: PASS.** `Macros_v2.ahk` validated via `AutoHotkey64.exe /ErrorStdOut /iLib <tmp> Macros_v2.ahk` with working dir = repo root (so `Lib_v2\` `#Include`s resolve). Result: exit code 0, empty stderr. Confirms the plan's prior parse-smoke claim. (Note: AHK exit codes are unreliable when launched via MSYS-bash pipes — verified through PowerShell `Start-Process -PassThru` with redirected stderr; calibrated against known-good and deliberately-broken probe scripts.)
+- **Verification step 4 — v1→v2 slot cross-compatibility, static format-equivalence diff (partial automatable substitute for the live byte-identity gate):**
+  - **Event-data file (`macros_events/*.txt`): byte-identical by construction. PASS.** `Lib/Slots.ahk` and `Lib_v2/Slots.ahk` use the same write (`FileAppend line + "\n"` per event) and the same read (`StrSplit/loop-parse on "\n", strip "\r", Trim, skip blank and ";"-comment lines`). A v1-recorded events file round-trips through v2 identically.
+  - **Slot INI metadata: DIVERGENCE — flag for the manual tester.** v1 `SaveSlot` persists `event_count, coord_mode, has_controller, target_exe, target_client_w, target_client_h, recorded`; the v2 `Lib_v2/Slots.ahk` save path writes only `event_count, coord_mode, recorded`, and `recorded` is date-only (`FormatTime(,"yyyy-MM-dd")`) vs v1's fuller timestamp. Event playback is unaffected (the event stream is identical), but **target-window remap metadata and controller-presence flag are not written by v2** — verify during the live parity gate whether v2 still remaps coordinates correctly for a v1 slot recorded against a specific target window.
+
+**Still manual-only (unchanged):** verification steps 1 (TESTING.md authoring) and 3 (live-exercise), plus the live controller + vJoy round-trip and a true byte-identical comparison of a freshly v1-recorded slot — these require live input capture and hardware and remain the open parity gate.
