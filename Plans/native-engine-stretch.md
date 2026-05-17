@@ -111,3 +111,14 @@ Each item should be its own focused PR with: native test added, C# smoke coverag
 - E3: kick off a long-running playback, call shutdown — observe thread exits within configured timeout, no `TerminateThread` log warning.
 
 End-to-end test for the full set: record a 60-second mixed keyboard + mouse + controller macro in MacrosApp, save, restart MacrosApp, replay against vJoy — observe identical output to AHK v1.
+
+## Automated Verification Run - 2026-05-16
+
+Unattended auto-test sweep (no live hardware). Tooling: CMake 4.2.3 + MinGW gcc 6.3.0.
+
+- **Clean rebuild from current `feature/gui-panel` source: PASS.** Fresh out-of-tree configure + build (`cmake -S . -B build_ci -G "MinGW Makefiles"`, `cmake --build build_ci`) — all 7 engine TUs (engine, xinput_poller, event_recorder, event_player, event_format, vjoy_output, timing) compiled, `MacrosEngine.dll` + both test exes linked, exit 0. No warnings surfaced in build tail. (`build_ci/` is a throwaway CI dir, not committed.)
+- **E1 (automatable portion) — `test_engine.exe`: PASS, 96 / 96.** Far exceeds the ≥52/52 bar; covers init/shutdown lifecycle, edge cases, double-shutdown safety, uninit-safety guards. Exit 0.
+- **E1/E2 supporting — `test_xinput_diff.exe`: PASS, 37 / 37.** states_equal symmetry, neutral detection, sub-deadzone wiggle filtering, dpad-direction diffs. Exit 0.
+- **MacrosApp.Smoke (.NET 8): KNOWN-SKIPPED.** No .NET SDK installed on this device (`dotnet` absent), so the C# WinForms smoke harness (saved-event persistence, vJoy API round-trip) could not run. This remains an automatable check — it is *blocked by missing tooling*, not by a need for human hands. Install a .NET 8 SDK to close it without manual testing.
+
+**Still manual-only (unchanged — the real parity gate):** E1 live-exercise on a physical Xbox/PS4 controller, E2 observable vJoy output in `joy.cpl`, E3 long-playback shutdown observed against a live run, and the 60-second mixed end-to-end vs AHK v1. These require live input and the vJoy visualizer and cannot be automated away.
