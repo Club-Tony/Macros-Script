@@ -1,6 +1,6 @@
 # Native Engine — Stretch Items from Completed Plan
 
-**Status:** In Progress (code complete 2026-04-28; manual live parity gate pending)
+**Status:** In Progress (code complete 2026-04-28; all automatable verification green 2026-05-17 incl. .NET smoke; only physical-controller live parity gate pending)
 **Created:** 2026-04-24
 **Goal:** Implement the three deferred items the `native-controller-dll.md` plan called out as out-of-scope when it was marked complete on 2026-04-23.
 
@@ -133,6 +133,17 @@ Unattended auto-test sweep (no live hardware). Tooling: CMake 4.2.3 + MinGW gcc 
 - **Clean rebuild from current `feature/gui-panel` source: PASS.** Fresh out-of-tree configure + build (`cmake -S . -B build_ci -G "MinGW Makefiles"`, `cmake --build build_ci`) — all 7 engine TUs (engine, xinput_poller, event_recorder, event_player, event_format, vjoy_output, timing) compiled, `MacrosEngine.dll` + both test exes linked, exit 0. No warnings surfaced in build tail. (`build_ci/` is a throwaway CI dir, not committed.)
 - **E1 (automatable portion) — `test_engine.exe`: PASS, 96 / 96.** Far exceeds the ≥52/52 bar; covers init/shutdown lifecycle, edge cases, double-shutdown safety, uninit-safety guards. Exit 0.
 - **E1/E2 supporting — `test_xinput_diff.exe`: PASS, 37 / 37.** states_equal symmetry, neutral detection, sub-deadzone wiggle filtering, dpad-direction diffs. Exit 0.
-- **MacrosApp.Smoke (.NET 8): KNOWN-SKIPPED.** No .NET SDK installed on this device (`dotnet` absent), so the C# WinForms smoke harness (saved-event persistence, vJoy API round-trip) could not run. This remains an automatable check — it is *blocked by missing tooling*, not by a need for human hands. Install a .NET 8 SDK to close it without manual testing.
+- **MacrosApp.Smoke (.NET 8): KNOWN-SKIPPED → CLOSED 2026-05-17 (see next section).** No .NET SDK on this device at the time; predicted to be closeable by installing an SDK rather than by human hands — confirmed below.
 
 **Still manual-only (unchanged — the real parity gate):** E1 live-exercise on a physical Xbox/PS4 controller, E2 observable vJoy output in `joy.cpl`, E3 long-playback shutdown observed against a live run, and the 60-second mixed end-to-end vs AHK v1. These require live input and the vJoy visualizer and cannot be automated away.
+
+## Automated Verification Run - 2026-05-17
+
+Closes the previously KNOWN-SKIPPED .NET smoke gate without any manual testing, exactly as the 2026-05-16 note predicted.
+
+- **.NET 8 SDK provisioned automatically.** Installed user-scope (`~/.dotnet`, SDK 8.0.421, no admin/elevation) via the official `dotnet-install` script — no system change requiring the user.
+- **`dotnet build MacrosApp/MacrosApp/MacrosApp.csproj` (net8.0-windows WinForms): PASS** — 0 warnings, 0 errors.
+- **`MacrosApp.Smoke`: PASS (exit 0, "Smoke test passed.").** Evidence: `saved_count=6`; `controller_row=C|4096|16|20|512|-512|0|0|25` (the E1/E2 assertion — a controller event was recorded and persisted to the slot file in the expected `C|` byte format); `saved_slot=smoke-slot`; record→persist→playback→`final_status=Idle`/`final_state=Idle` round-trip clean (E3 cooperative shutdown — no hang, no `TerminateThread`); `vjoy_available=True vjoy_ready=False` → `start_status=Playing: smoke-slot (vJoy unavailable)` exercised the graceful vJoy-absent path (TESTING.md failure-mode item) without crashing.
+- Re-confirmed alongside the 2026-05-16 native results: `test_engine.exe` 96/96, `test_xinput_diff.exe` 37/37 (re-run 2026-05-17, still PASS, exit 0).
+
+**Net:** every automatable gate for E1/E2/E3 is now green. The sole remaining gate is the genuinely-physical one: live-exercise with a real Xbox/PS4 controller and an *enabled* vJoy device (here `vjoy_ready=False`, so observable `joy.cpl` deflection and true hardware recording fidelity still need a human + configured vJoy). Not marking the plan Completed on that basis — but no code or tooling work remains.
