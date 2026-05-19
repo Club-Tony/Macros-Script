@@ -36,9 +36,19 @@ public static class NativeEngine
     private const string DllName = "MacrosEngine.dll";
     // We only need a temporary native buffer large enough for the engine to parse and copy.
     private const int MaxNativeMacroEventBytes = 64;
+    private const uint ControllerOutputVJoy = 0;
+    private const uint ControllerOutputCallback = 1;
 
     private static bool _available;
     private static bool _checked;
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    private delegate bool ControllerOutputCallbackDelegate(IntPtr state);
+
+    private static readonly ControllerOutputCallbackDelegate s_virtualXboxCallback = DispatchVirtualXboxOutput;
+    private static readonly IntPtr s_virtualXboxCallbackPtr =
+        Marshal.GetFunctionPointerForDelegate(s_virtualXboxCallback);
 
     /// <summary>
     /// Whether the native DLL is loaded and available.
@@ -181,6 +191,16 @@ public static class NativeEngine
     [return: MarshalAs(UnmanagedType.I1)]
     public static extern bool Engine_IsPaused();
 
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Engine_SetControllerOutputMode(uint mode);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Engine_GetControllerOutputMode();
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Engine_SetControllerOutputCallback(IntPtr callback);
+
     // ================================================================
     // vJoy output
     // ================================================================
@@ -225,7 +245,15 @@ public static class NativeEngine
     public static void TryShutdown()
     {
         if (!IsAvailable) return;
-        try { Engine_Shutdown(); } catch { }
+        try
+        {
+            TryResetControllerOutput();
+            Engine_Shutdown();
+        }
+        catch
+        {
+            VirtualXboxOutput.Disconnect();
+        }
     }
 
     public static bool TryGetControllerState(uint playerIndex, out ControllerState state)
@@ -409,6 +437,68 @@ public static class NativeEngine
         try { Engine_ResumePlayback(); } catch { }
     }
 
+    public static bool TryUseVJoyControllerOutput()
+    {
+        if (!IsAvailable) return false;
+
+        try
+        {
+            Engine_SetControllerOutputCallback(IntPtr.Zero);
+            return Engine_SetControllerOutputMode(ControllerOutputVJoy);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public static bool TryUseVirtualXboxControllerOutput(out string error)
+    {
+        error = string.Empty;
+
+        if (!IsAvailable)
+        {
+            error = "Native engine is not available.";
+            return false;
+        }
+
+        if (!VirtualXboxOutput.TryEnsureConnected(out error))
+            return false;
+
+        try
+        {
+            Engine_SetControllerOutputCallback(s_virtualXboxCallbackPtr);
+            if (Engine_SetControllerOutputMode(ControllerOutputCallback))
+                return true;
+
+            error = "Native engine rejected callback controller output.";
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+
+        TryResetControllerOutput();
+        return false;
+    }
+
+    public static void TryResetControllerOutput()
+    {
+        if (IsAvailable)
+        {
+            try
+            {
+                Engine_SetControllerOutputMode(ControllerOutputVJoy);
+                Engine_SetControllerOutputCallback(IntPtr.Zero);
+            }
+            catch
+            {
+            }
+        }
+
+        VirtualXboxOutput.Disconnect();
+    }
+
     public static bool TrySetVJoyDeviceId(uint deviceId)
     {
         if (!IsAvailable) return false;
@@ -499,5 +589,21 @@ public static class NativeEngine
         }
 
         return count;
+    }
+
+    private static bool DispatchVirtualXboxOutput(IntPtr statePtr)
+    {
+        if (statePtr == IntPtr.Zero)
+            return false;
+
+        try
+        {
+            var state = Marshal.PtrToStructure<ControllerState>(statePtr);
+            return VirtualXboxOutput.TryDispatch(state, out _);
+        }
+        catch
+        {
+            return false;
+        }
     }
 }
