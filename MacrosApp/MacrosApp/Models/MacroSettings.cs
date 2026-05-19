@@ -7,6 +7,12 @@ public enum SendModeType
     Event
 }
 
+public enum ControllerOutputType
+{
+    VJoy,
+    VirtualXbox
+}
+
 public class MacroSettings
 {
     public int AutoclickerInterval { get; set; } = 100;
@@ -15,4 +21,5 @@ public class MacroSettings
     public int ThumbDeadzone { get; set; } = 7849;
     public int TriggerDeadzone { get; set; } = 30;
     public int VJoyDeviceId { get; set; } = 1;
+    public ControllerOutputType ControllerOutput { get; set; } = ControllerOutputType.VJoy;
 }

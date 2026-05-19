@@ -39,6 +39,9 @@ static MacroEvent     *g_play_events     = NULL;
 static uint32_t        g_play_count      = 0;
 static uint32_t        g_play_loops      = 0;   /* 0 = infinite */
 
+static ControllerOutputMode     g_controller_output_mode = CONTROLLER_OUTPUT_VJOY;
+static ControllerOutputCallback g_controller_output_callback = NULL;
+
 static void close_finished_play_thread(void)
 {
     if (g_play_thread &&
@@ -153,6 +156,27 @@ static void dispatch_mouse_wheel(const MacroEvent *evt)
     SendInput(1, &inp, sizeof(INPUT));
 }
 
+static bool dispatch_controller(const ControllerState *state)
+{
+    ControllerOutputMode mode;
+    ControllerOutputCallback callback;
+
+    EnterCriticalSection(&g_engine_cs);
+    mode = g_controller_output_mode;
+    callback = g_controller_output_callback;
+    LeaveCriticalSection(&g_engine_cs);
+
+    if (mode == CONTROLLER_OUTPUT_CALLBACK) {
+        if (callback && callback(state))
+            return true;
+
+        OutputDebugStringA("MacrosEngine: EVENT_CONTROLLER callback output failed\n");
+        return false;
+    }
+
+    return vjoy_dispatch_controller(state);
+}
+
 static void dispatch_event(const MacroEvent *evt)
 {
     switch (evt->type) {
@@ -171,8 +195,8 @@ static void dispatch_event(const MacroEvent *evt)
         dispatch_mouse_wheel(evt);
         break;
     case EVENT_CONTROLLER:
-        if (!vjoy_dispatch_controller(&evt->data.controller))
-            OutputDebugStringA("MacrosEngine: EVENT_CONTROLLER skipped (vJoy unavailable)\n");
+        if (!dispatch_controller(&evt->data.controller))
+            OutputDebugStringA("MacrosEngine: EVENT_CONTROLLER skipped (controller output unavailable)\n");
         break;
     }
 }
@@ -360,6 +384,50 @@ ENGINE_API bool Engine_IsPaused(void)
     return g_paused;
 }
 
+ENGINE_API bool Engine_SetControllerOutputMode(ControllerOutputMode mode)
+{
+    if (!Engine_IsInitialized())
+        return false;
+
+    if (mode != CONTROLLER_OUTPUT_VJOY && mode != CONTROLLER_OUTPUT_CALLBACK)
+        return false;
+
+    EnterCriticalSection(&g_engine_cs);
+    if (mode == CONTROLLER_OUTPUT_CALLBACK && !g_controller_output_callback) {
+        LeaveCriticalSection(&g_engine_cs);
+        return false;
+    }
+
+    g_controller_output_mode = mode;
+    LeaveCriticalSection(&g_engine_cs);
+    return true;
+}
+
+ENGINE_API ControllerOutputMode Engine_GetControllerOutputMode(void)
+{
+    ControllerOutputMode mode;
+
+    if (!Engine_IsInitialized())
+        return CONTROLLER_OUTPUT_VJOY;
+
+    EnterCriticalSection(&g_engine_cs);
+    mode = g_controller_output_mode;
+    LeaveCriticalSection(&g_engine_cs);
+    return mode;
+}
+
+ENGINE_API void Engine_SetControllerOutputCallback(ControllerOutputCallback callback)
+{
+    if (!Engine_IsInitialized())
+        return;
+
+    EnterCriticalSection(&g_engine_cs);
+    g_controller_output_callback = callback;
+    if (!callback && g_controller_output_mode == CONTROLLER_OUTPUT_CALLBACK)
+        g_controller_output_mode = CONTROLLER_OUTPUT_VJOY;
+    LeaveCriticalSection(&g_engine_cs);
+}
+
 /* ================================================================
  * Cleanup (called by Engine_Shutdown)
  * ================================================================ */
@@ -377,6 +445,8 @@ void player_cleanup(void)
     g_playing = false;
     g_paused = false;
     g_stop_requested = false;
+    g_controller_output_mode = CONTROLLER_OUTPUT_VJOY;
+    g_controller_output_callback = NULL;
 
     if (g_player_cancel) {
         CloseHandle(g_player_cancel);

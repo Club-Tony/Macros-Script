@@ -290,6 +290,72 @@ static SmokeResult RunSmoke(MainForm form, string workspaceRoot)
         ? string.Empty
         : "Playback did not settle back to Idle.";
 
+    if (!success)
+    {
+        return new SmokeResult(
+            SlotName: slotName,
+            SavedCount: savedCount,
+            StartStatus: startStatus,
+            FinalStatus: finalStatus,
+            FinalState: finalState,
+            SlotPlaybackActive: slotPlaybackActive,
+            EnginePlaying: enginePlaying,
+            IniContainsSlot: iniContainsSlot,
+            EventFileExists: eventFileExists,
+            FailureReason: failureReason,
+            Success: false);
+    }
+
+    if (Environment.GetEnvironmentVariable("MACROS_SMOKE_VIRTUAL_XBOX") == "1")
+    {
+        settings.ControllerOutput = ControllerOutputType.VirtualXbox;
+        playSlotMethod.Invoke(form, new object[] { new MacroSlot { Name = slotName } });
+
+        string virtualXboxStartStatus = statusLabel.Text;
+        if (!virtualXboxStartStatus.StartsWith("Playing:", StringComparison.Ordinal) ||
+            !virtualXboxStartStatus.Contains("VirtualXbox", StringComparison.Ordinal))
+        {
+            return SmokeResult.Fail(slotName,
+                "VirtualXbox playback did not enter the expected playing state: " + virtualXboxStartStatus,
+                workspaceRoot);
+        }
+
+        stopwatch.Restart();
+        while (stopwatch.Elapsed < TimeSpan.FromSeconds(6))
+        {
+            Application.DoEvents();
+            Thread.Sleep(50);
+        }
+
+        string virtualXboxFinalStatus = statusLabel.Text;
+        string virtualXboxFinalState = typeof(MainForm).GetField(
+            "_currentState",
+            BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(form)?.ToString() ?? "<missing>";
+        bool virtualXboxSlotPlaybackActive = (bool?)typeof(MainForm).GetField(
+            "_slotPlaybackActive",
+            BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(form) ?? true;
+        bool virtualXboxEnginePlaying = NativeEngine.TryIsPlaying();
+
+        Console.WriteLine("virtual_xbox_start_status=" + virtualXboxStartStatus);
+        Console.WriteLine("virtual_xbox_final_status=" + virtualXboxFinalStatus);
+        Console.WriteLine("virtual_xbox_final_state=" + virtualXboxFinalState);
+        Console.WriteLine("virtual_xbox_slot_playback_active=" + virtualXboxSlotPlaybackActive);
+        Console.WriteLine("virtual_xbox_engine_playing=" + virtualXboxEnginePlaying);
+
+        if (virtualXboxFinalStatus != "Idle" ||
+            virtualXboxFinalState != "Idle" ||
+            virtualXboxSlotPlaybackActive ||
+            virtualXboxEnginePlaying)
+        {
+            return SmokeResult.Fail(slotName,
+                "VirtualXbox playback did not settle back to Idle.",
+                workspaceRoot);
+        }
+
+        settings.ControllerOutput = ControllerOutputType.VJoy;
+        NativeEngine.TryResetControllerOutput();
+    }
+
     return new SmokeResult(
         SlotName: slotName,
         SavedCount: savedCount,

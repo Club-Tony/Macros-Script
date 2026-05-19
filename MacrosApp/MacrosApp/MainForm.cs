@@ -137,8 +137,32 @@ public partial class MainForm : Form
         {
             if (Enum.TryParse<SendModeType>(cmbSendMode.SelectedItem?.ToString(), out var mode))
                 _settings.SendMode = mode;
+            ClearComboSelectionHighlight(cmbSendMode);
         };
+        cmbControllerOutput.SelectedIndexChanged += (_, _) =>
+        {
+            if (Enum.TryParse<ControllerOutputType>(cmbControllerOutput.SelectedItem?.ToString(), out var output))
+                _settings.ControllerOutput = output;
+            ClearComboSelectionHighlight(cmbControllerOutput);
+        };
+        cmbSendMode.DropDownClosed += (_, _) => ClearComboSelectionHighlight(cmbSendMode);
+        cmbControllerOutput.DropDownClosed += (_, _) => ClearComboSelectionHighlight(cmbControllerOutput);
         nudLoopCount.ValueChanged += (_, _) => _settings.LoopCount = (int)nudLoopCount.Value;
+    }
+
+    private void ClearComboSelectionHighlight(ComboBox combo)
+    {
+        if (!IsHandleCreated || combo.IsDisposed)
+            return;
+
+        BeginInvoke((MethodInvoker)(() =>
+        {
+            if (combo.IsDisposed)
+                return;
+
+            combo.SelectionStart = 0;
+            combo.SelectionLength = 0;
+        }));
     }
 
     private void InitializePlaybackMonitor()
@@ -192,6 +216,10 @@ public partial class MainForm : Form
             "Selected send mode for direct macro output like slash, autoclick, and hold/turbo. Play falls back to Input on modern Windows, and recorded slot playback still uses the native engine.");
         _hoverHelp.SetToolTip(cmbSendMode,
             "Choose how direct key and mouse output is emitted. Profiles can also set this automatically; Input and Event are honored, while Play currently uses Input.");
+        _hoverHelp.SetToolTip(lblControllerOutput,
+            "Output backend for recorded controller events during slot playback.");
+        _hoverHelp.SetToolTip(cmbControllerOutput,
+            "Use vJoy for tools that read vJoy devices, or VirtualXbox for games that only listen to XInput controllers.");
         _hoverHelp.SetToolTip(lblLoopCount,
             "How many times a selected recording should replay. 0 means loop until you stop it.");
         _hoverHelp.SetToolTip(nudLoopCount,
@@ -224,6 +252,8 @@ public partial class MainForm : Form
         if (effectiveProfile != null)
         {
             _settings.VJoyDeviceId = Math.Clamp(effectiveProfile.VJoyDeviceId, 1, 16);
+            _settings.ControllerOutput = effectiveProfile.ControllerOutput;
+            cmbControllerOutput.SelectedItem = effectiveProfile.ControllerOutput.ToString();
         }
 
         // Apply profile settings if detected
@@ -299,6 +329,7 @@ public partial class MainForm : Form
         DeactivateHoldMode(silent: true);
         DisposeRecordingHook();
         DisposeAutoclickerTimer();
+        NativeEngine.TryStopPlayback();
         DisposePlaybackMonitor();
         _hotkeyManager.Dispose();
         controllerState.StopRefresh();
@@ -346,6 +377,7 @@ public partial class MainForm : Form
         DeactivateHoldMode(silent: true);
         DisposeRecordingHook();
         DisposeAutoclickerTimer();
+        NativeEngine.TryStopPlayback();
         DisposePlaybackMonitor();
         _hotkeyManager.Dispose();
         controllerState.StopRefresh();
@@ -445,8 +477,8 @@ public partial class MainForm : Form
             DeactivateCurrentMacro();
         else if (NativeEngine.TryIsPlaying())
         {
-            StopSlotPlaybackTracking();
             NativeEngine.TryStopPlayback();
+            StopSlotPlaybackTracking();
         }
 
         // Activate new
@@ -529,8 +561,8 @@ public partial class MainForm : Form
     {
         if (_currentState == MacroState.Playing && NativeEngine.TryIsPlaying())
         {
-            StopSlotPlaybackTracking();
             NativeEngine.TryStopPlayback();
+            StopSlotPlaybackTracking();
             SetState(MacroState.Idle, "Idle");
             return;
         }
@@ -571,38 +603,43 @@ public partial class MainForm : Form
             return;
         }
 
-        bool hasControllerEvents = SlotHasControllerEvents(eventPath);
-        bool vJoyReadyForController = true;
-        if (hasControllerEvents)
-        {
-            vJoyReadyForController =
-                NativeEngine.TryGetVJoyState(out var vJoyState) && vJoyState.Ready;
-        }
-
         if (!NativeEngine.TryLoadPlaybackBuffer(eventPath, out var buffer, out uint count))
         {
             SetState(MacroState.Idle, $"Unable to load: {slot.Name}");
             return;
         }
 
+        bool hasControllerEvents = SlotHasControllerEvents(eventPath);
+        string controllerOutputStatus = string.Empty;
+        bool controllerOutputReady = true;
+
         try
         {
             if (NativeEngine.TryIsPlaying())
             {
-                StopSlotPlaybackTracking();
                 NativeEngine.TryStopPlayback();
+                StopSlotPlaybackTracking();
+            }
+
+            if (!TryPrepareControllerOutputForPlayback(hasControllerEvents, out controllerOutputReady, out controllerOutputStatus))
+            {
+                SetState(MacroState.Idle, controllerOutputStatus);
+                return;
             }
 
             if (!NativeEngine.TryStartPlayback(buffer, count, (uint)Math.Max(0, _settings.LoopCount)))
             {
+                NativeEngine.TryResetControllerOutput();
                 SetState(MacroState.Idle, $"Playback failed: {slot.Name}");
                 return;
             }
 
             _slotPlaybackActive = true;
-            string status = hasControllerEvents && !vJoyReadyForController
-                ? $"Playing: {slot.Name} (vJoy unavailable)"
+            string status = hasControllerEvents && !string.IsNullOrWhiteSpace(controllerOutputStatus)
+                ? $"Playing: {slot.Name} ({controllerOutputStatus})"
                 : $"Playing: {slot.Name}";
+            if (hasControllerEvents && !controllerOutputReady)
+                status = $"Playing: {slot.Name} ({controllerOutputStatus})";
             SetState(MacroState.Playing, status);
         }
         finally
@@ -632,6 +669,41 @@ public partial class MainForm : Form
         return false;
     }
 
+    private bool TryPrepareControllerOutputForPlayback(
+        bool hasControllerEvents,
+        out bool outputReady,
+        out string status)
+    {
+        outputReady = true;
+        status = string.Empty;
+
+        if (!hasControllerEvents)
+        {
+            NativeEngine.TryUseVJoyControllerOutput();
+            return true;
+        }
+
+        if (_settings.ControllerOutput == ControllerOutputType.VirtualXbox)
+        {
+            if (NativeEngine.TryUseVirtualXboxControllerOutput(out var error))
+            {
+                status = "VirtualXbox";
+                return true;
+            }
+
+            outputReady = false;
+            status = string.IsNullOrWhiteSpace(error)
+                ? "VirtualXbox unavailable"
+                : $"VirtualXbox unavailable: {error}";
+            return false;
+        }
+
+        NativeEngine.TryUseVJoyControllerOutput();
+        outputReady = NativeEngine.TryGetVJoyState(out var vJoyState) && vJoyState.Ready;
+        status = outputReady ? "vJoy" : "vJoy unavailable";
+        return true;
+    }
+
     private void CancelCurrentOperation()
     {
         if (_activeMacroType != null)
@@ -640,8 +712,8 @@ public partial class MainForm : Form
         }
         else if (_currentState == MacroState.Playing)
         {
-            StopSlotPlaybackTracking();
             NativeEngine.TryStopPlayback();
+            StopSlotPlaybackTracking();
             SetState(MacroState.Idle, "Idle");
         }
     }
@@ -1220,6 +1292,7 @@ public partial class MainForm : Form
     private void StopSlotPlaybackTracking()
     {
         _slotPlaybackActive = false;
+        NativeEngine.TryResetControllerOutput();
     }
 
     private void DisposePlaybackMonitor()

@@ -7,6 +7,7 @@ public class GameProfile
     public SendModeType SendMode { get; set; } = SendModeType.Input;
     public int VJoyDeviceId { get; set; } = 1;
     public string VJoyPovMode { get; set; } = string.Empty;
+    public ControllerOutputType ControllerOutput { get; set; } = ControllerOutputType.VJoy;
 
     public override string ToString() => string.IsNullOrEmpty(ProcessName)
         ? Name

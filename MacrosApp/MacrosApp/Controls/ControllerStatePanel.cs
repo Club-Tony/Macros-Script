@@ -27,10 +27,16 @@ public class ControllerStatePanel : UserControl
         BButton,
         XButton,
         YButton,
+        DPadUp,
+        DPadDown,
+        DPadLeft,
+        DPadRight,
         LeftBumper,
         RightBumper,
         BackButton,
-        StartButton
+        StartButton,
+        LeftThumbButton,
+        RightThumbButton
     }
 
     private System.Windows.Forms.Timer? _refreshTimer;
@@ -48,6 +54,8 @@ public class ControllerStatePanel : UserControl
 
     // Colors
     private static readonly Color BgColor = Color.FromArgb(30, 30, 30);
+    private static readonly Color BodyFill = Color.FromArgb(42, 42, 42);
+    private static readonly Color BodyEdge = Color.FromArgb(82, 82, 82);
     private static readonly Color StickBg = Color.FromArgb(50, 50, 50);
     private static readonly Color StickDot = Color.FromArgb(0, 180, 255);
     private static readonly Color DeadzoneColor = Color.FromArgb(60, 60, 60);
@@ -142,7 +150,8 @@ public class ControllerStatePanel : UserControl
         if (!Visible || !_pollingAvailable)
             return;
 
-        bool connected = NativeEngine.TryGetControllerState(0, out var state);
+        bool pollOk = NativeEngine.TryGetControllerState(0, out var state);
+        bool connected = pollOk && state.Connected;
         ApplyPolledState(connected ? state : default, connected);
     }
 
@@ -167,58 +176,73 @@ public class ControllerStatePanel : UserControl
             return;
         }
 
-        int w = ClientSize.Width;
-        int h = ClientSize.Height;
+        const float designW = 620f;
+        const float designH = 220f;
 
-        // Layout regions
-        int stickRadius = Math.Min(w / 6, h / 3);
-        int padding = 10;
+        float scale = Math.Min(ClientSize.Width / designW, ClientSize.Height / designH);
+        float ox = (ClientSize.Width - designW * scale) / 2f;
+        float oy = (ClientSize.Height - designH * scale) / 2f;
+        int X(float value) => (int)Math.Round(ox + value * scale);
+        int Y(float value) => (int)Math.Round(oy + value * scale);
+        int S(float value) => Math.Max(1, (int)Math.Round(value * scale));
+        RectangleF Rect(float x, float y, float width, float height) =>
+            new(ox + x * scale, oy + y * scale, width * scale, height * scale);
 
-        // Left stick
-        int lx = padding + stickRadius;
-        int ly = h / 2;
-        DrawStick(g, lx, ly, stickRadius, _state.LeftThumbX, _state.LeftThumbY, "L");
+        DrawControllerShell(
+            g,
+            Rect(82, 36, 456, 132),
+            Rect(18, 52, 190, 138),
+            Rect(412, 52, 190, 138),
+            Rect(92, 118, 118, 82),
+            Rect(410, 118, 118, 82),
+            S(38));
 
-        // Right stick
-        int rx = w - padding - stickRadius;
-        int ry = h / 2;
-        DrawStick(g, rx, ry, stickRadius, _state.RightThumbX, _state.RightThumbY, "R");
-
-        // Triggers (between sticks, top)
-        int triggerW = 30;
-        int triggerH = h - 40;
-        int triggerY = 20;
-        int centerX = w / 2;
-        DrawTrigger(g, centerX - 50, triggerY, triggerW, triggerH, _state.LeftTrigger, "LT");
-        DrawTrigger(g, centerX + 20, triggerY, triggerW, triggerH, _state.RightTrigger, "RT");
-
-        // Buttons (center area)
-        int btnSize = 14;
-        int btnCenterX = centerX;
-        int btnCenterY = h / 2 + 15;
-
-        // Face buttons (A/B/X/Y) - diamond layout
-        DrawButton(g, btnCenterX, btnCenterY + btnSize + 4, btnSize, "A",
-            (_state.Buttons & XINPUT_GAMEPAD_A) != 0, Color.FromArgb(0, 200, 80));
-        DrawButton(g, btnCenterX + btnSize + 4, btnCenterY, btnSize, "B",
-            (_state.Buttons & XINPUT_GAMEPAD_B) != 0, Color.FromArgb(220, 50, 50));
-        DrawButton(g, btnCenterX - btnSize - 4, btnCenterY, btnSize, "X",
-            (_state.Buttons & XINPUT_GAMEPAD_X) != 0, Color.FromArgb(50, 100, 220));
-        DrawButton(g, btnCenterX, btnCenterY - btnSize - 4, btnSize, "Y",
-            (_state.Buttons & XINPUT_GAMEPAD_Y) != 0, Color.FromArgb(220, 200, 0));
-
-        // Bumpers
-        int bumperY = 8;
-        DrawPill(g, centerX - 90, bumperY, 50, 14, "LB",
+        DrawTriggerBar(g, X(168), Y(18), S(104), S(12), _state.LeftTrigger, "LT");
+        DrawTriggerBar(g, X(348), Y(18), S(104), S(12), _state.RightTrigger, "RT");
+        DrawPill(g, X(168), Y(34), S(104), S(20), "LB",
             (_state.Buttons & XINPUT_GAMEPAD_LEFT_SHOULDER) != 0);
-        DrawPill(g, centerX + 40, bumperY, 50, 14, "RB",
+        DrawPill(g, X(348), Y(34), S(104), S(20), "RB",
             (_state.Buttons & XINPUT_GAMEPAD_RIGHT_SHOULDER) != 0);
 
-        // Start / Back
-        DrawPill(g, centerX - 40, h - 24, 30, 12, "Bk",
+        DrawStick(
+            g,
+            X(145),
+            Y(96),
+            S(42),
+            _state.LeftThumbX,
+            _state.LeftThumbY,
+            "L",
+            (_state.Buttons & XINPUT_GAMEPAD_LEFT_THUMB) != 0);
+
+        DrawDPad(g, X(242), Y(142), S(18), _state.Buttons);
+
+        DrawPill(g, X(282), Y(108), S(36), S(16), "Bk",
             (_state.Buttons & XINPUT_GAMEPAD_BACK) != 0);
-        DrawPill(g, centerX + 10, h - 24, 30, 12, "St",
+        DrawPill(g, X(322), Y(108), S(36), S(16), "St",
             (_state.Buttons & XINPUT_GAMEPAD_START) != 0);
+
+        int btnSize = S(22);
+        int btnGap = S(25);
+        int faceX = X(405);
+        int faceY = Y(96);
+        DrawButton(g, faceX, faceY + btnGap, btnSize, "A",
+            (_state.Buttons & XINPUT_GAMEPAD_A) != 0, Color.FromArgb(0, 200, 80));
+        DrawButton(g, faceX + btnGap, faceY, btnSize, "B",
+            (_state.Buttons & XINPUT_GAMEPAD_B) != 0, Color.FromArgb(220, 50, 50));
+        DrawButton(g, faceX - btnGap, faceY, btnSize, "X",
+            (_state.Buttons & XINPUT_GAMEPAD_X) != 0, Color.FromArgb(50, 110, 220));
+        DrawButton(g, faceX, faceY - btnGap, btnSize, "Y",
+            (_state.Buttons & XINPUT_GAMEPAD_Y) != 0, Color.FromArgb(220, 200, 0));
+
+        DrawStick(
+            g,
+            X(475),
+            Y(142),
+            S(36),
+            _state.RightThumbX,
+            _state.RightThumbY,
+            "R",
+            (_state.Buttons & XINPUT_GAMEPAD_RIGHT_THUMB) != 0);
     }
 
     private void DrawDisconnected(Graphics g)
@@ -244,7 +268,43 @@ public class ControllerStatePanel : UserControl
         g.DrawString(_statusDetail, detailFont, detailBrush, detailRect, format);
     }
 
-    private void DrawStick(Graphics g, int cx, int cy, int radius, short rawX, short rawY, string label)
+    private static void DrawControllerShell(
+        Graphics g,
+        RectangleF center,
+        RectangleF leftGrip,
+        RectangleF rightGrip,
+        RectangleF leftHandle,
+        RectangleF rightHandle,
+        int cornerRadius)
+    {
+        using var bodyBrush = new SolidBrush(BodyFill);
+        using var edgePen = new Pen(BodyEdge, 1.2f);
+
+        using (var centerPath = CreateRoundedRectangle(center, cornerRadius))
+        using (var leftHandlePath = CreateRoundedRectangle(leftHandle, cornerRadius))
+        using (var rightHandlePath = CreateRoundedRectangle(rightHandle, cornerRadius))
+        {
+            g.FillEllipse(bodyBrush, leftGrip);
+            g.FillEllipse(bodyBrush, rightGrip);
+            g.FillPath(bodyBrush, centerPath);
+            g.FillPath(bodyBrush, leftHandlePath);
+            g.FillPath(bodyBrush, rightHandlePath);
+
+            g.DrawEllipse(edgePen, leftGrip);
+            g.DrawEllipse(edgePen, rightGrip);
+            g.DrawPath(edgePen, centerPath);
+        }
+    }
+
+    private void DrawStick(
+        Graphics g,
+        int cx,
+        int cy,
+        int radius,
+        short rawX,
+        short rawY,
+        string label,
+        bool pressed)
     {
         // Background circle
         using (var bg = new SolidBrush(StickBg))
@@ -257,7 +317,7 @@ public class ControllerStatePanel : UserControl
             g.DrawEllipse(dzPen, cx - dzRadius, cy - dzRadius, dzRadius * 2, dzRadius * 2);
 
         // Border
-        using (var border = new Pen(Color.FromArgb(80, 80, 80), 1f))
+        using (var border = new Pen(pressed ? ButtonOn : Color.FromArgb(90, 90, 90), pressed ? 2.5f : 1.2f))
             g.DrawEllipse(border, cx - radius, cy - radius, radius * 2, radius * 2);
 
         // Stick position dot
@@ -276,33 +336,65 @@ public class ControllerStatePanel : UserControl
         g.DrawString(label, font, textBrush, cx - 4, cy + radius + 2);
     }
 
-    private void DrawTrigger(Graphics g, int x, int y, int w, int h, byte value, string label)
+    private void DrawTriggerBar(Graphics g, int x, int y, int w, int h, byte value, string label)
     {
-        // Background
+        using var bgPath = CreateRoundedRectangle(new RectangleF(x, y, w, h), h);
         using (var bg = new SolidBrush(TriggerBg))
-            g.FillRectangle(bg, x, y, w, h);
+            g.FillPath(bg, bgPath);
 
-        // Deadzone line
-        float dzRatio = _triggerDeadzone / 255f;
-        int dzY = y + h - (int)(h * dzRatio);
-        using (var dzPen = new Pen(DeadzoneColor, 1f))
-            g.DrawLine(dzPen, x, dzY, x + w, dzY);
-
-        // Fill from bottom
         float ratio = value / 255f;
-        int fillH = (int)(h * ratio);
-        using (var fill = new SolidBrush(TriggerFill))
-            g.FillRectangle(fill, x, y + h - fillH, w, fillH);
+        int fillW = Math.Max(0, (int)(w * ratio));
+        if (fillW > 0)
+        {
+            using var fillPath = CreateRoundedRectangle(new RectangleF(x, y, fillW, h), h);
+            using var fill = new SolidBrush(TriggerFill);
+            g.FillPath(fill, fillPath);
+        }
 
-        // Border
+        float dzRatio = _triggerDeadzone / 255f;
+        int dzX = x + (int)(w * dzRatio);
+        using (var dzPen = new Pen(DeadzoneColor, 1f))
+            g.DrawLine(dzPen, dzX, y, dzX, y + h);
+
         using (var border = new Pen(Color.FromArgb(80, 80, 80), 1f))
-            g.DrawRectangle(border, x, y, w, h);
+            g.DrawPath(border, bgPath);
 
-        // Label
         using var font = new Font("Segoe UI", 7f);
         using var textBrush = new SolidBrush(TextColor);
         var size = g.MeasureString(label, font);
-        g.DrawString(label, font, textBrush, x + (w - size.Width) / 2, y + h + 2);
+        g.DrawString(label, font, textBrush, x + (w - size.Width) / 2, y - size.Height - 1);
+    }
+
+    private void DrawDPad(Graphics g, int cx, int cy, int unit, ushort buttons)
+    {
+        int arm = unit;
+        int length = unit * 2;
+        DrawDPadPart(g, new Rectangle(cx - arm / 2, cy - length - arm / 2, arm, length), "U",
+            (buttons & XINPUT_GAMEPAD_DPAD_UP) != 0);
+        DrawDPadPart(g, new Rectangle(cx - arm / 2, cy + arm / 2, arm, length), "D",
+            (buttons & XINPUT_GAMEPAD_DPAD_DOWN) != 0);
+        DrawDPadPart(g, new Rectangle(cx - length - arm / 2, cy - arm / 2, length, arm), "L",
+            (buttons & XINPUT_GAMEPAD_DPAD_LEFT) != 0);
+        DrawDPadPart(g, new Rectangle(cx + arm / 2, cy - arm / 2, length, arm), "R",
+            (buttons & XINPUT_GAMEPAD_DPAD_RIGHT) != 0);
+
+        using var centerPath = CreateRoundedRectangle(new RectangleF(cx - arm / 2f, cy - arm / 2f, arm, arm), arm / 4f);
+        using var centerBrush = new SolidBrush(Color.FromArgb(58, 58, 58));
+        g.FillPath(centerBrush, centerPath);
+    }
+
+    private void DrawDPadPart(Graphics g, Rectangle rect, string label, bool pressed)
+    {
+        using var path = CreateRoundedRectangle(rect, Math.Max(3f, rect.Height / 4f));
+        using var brush = new SolidBrush(pressed ? ButtonOn : ButtonOff);
+        using var border = new Pen(Color.FromArgb(92, 92, 92), 1f);
+        g.FillPath(brush, path);
+        g.DrawPath(border, path);
+
+        using var font = new Font("Segoe UI", 6.5f, FontStyle.Bold);
+        using var textBrush = new SolidBrush(pressed ? Color.White : TextColor);
+        var textSize = g.MeasureString(label, font);
+        g.DrawString(label, font, textBrush, rect.Left + (rect.Width - textSize.Width) / 2f, rect.Top + (rect.Height - textSize.Height) / 2f);
     }
 
     private void DrawButton(Graphics g, int cx, int cy, int size, string label, bool pressed, Color activeColor)
@@ -386,52 +478,72 @@ public class ControllerStatePanel : UserControl
         if (!_connected)
             return HoverRegion.Disconnected;
 
-        int w = ClientSize.Width;
-        int h = ClientSize.Height;
-        if (w <= 0 || h <= 0)
+        if (ClientSize.Width <= 0 || ClientSize.Height <= 0)
             return HoverRegion.None;
 
-        int stickRadius = Math.Min(w / 6, h / 3);
-        int padding = 10;
-        int lx = padding + stickRadius;
-        int ly = h / 2;
-        int rx = w - padding - stickRadius;
-        int ry = h / 2;
-        int centerX = w / 2;
-        int triggerW = 30;
-        int triggerH = h - 40;
-        int triggerY = 20;
-        int btnSize = 14;
-        int btnRadius = btnSize / 2;
-        int btnCenterY = h / 2 + 15;
-        int bumperY = 8;
+        const float designW = 620f;
+        const float designH = 220f;
 
-        if (PointInCircle(point, lx, ly, stickRadius))
+        float scale = Math.Min(ClientSize.Width / designW, ClientSize.Height / designH);
+        float ox = (ClientSize.Width - designW * scale) / 2f;
+        float oy = (ClientSize.Height - designH * scale) / 2f;
+        int X(float value) => (int)Math.Round(ox + value * scale);
+        int Y(float value) => (int)Math.Round(oy + value * scale);
+        int S(float value) => Math.Max(1, (int)Math.Round(value * scale));
+
+        int leftStickX = X(145);
+        int leftStickY = Y(96);
+        int leftStickRadius = S(42);
+        int rightStickX = X(475);
+        int rightStickY = Y(142);
+        int rightStickRadius = S(36);
+        int dpadX = X(242);
+        int dpadY = Y(142);
+        int dpadUnit = S(18);
+        int faceX = X(405);
+        int faceY = Y(96);
+        int faceGap = S(25);
+        int faceRadius = S(22) / 2;
+
+        if (PointInCircle(point, leftStickX, leftStickY, S(15)))
+            return HoverRegion.LeftThumbButton;
+        if (PointInCircle(point, rightStickX, rightStickY, S(14)))
+            return HoverRegion.RightThumbButton;
+        if (PointInCircle(point, leftStickX, leftStickY, leftStickRadius))
             return HoverRegion.LeftStick;
-        if (PointInCircle(point, rx, ry, stickRadius))
+        if (PointInCircle(point, rightStickX, rightStickY, rightStickRadius))
             return HoverRegion.RightStick;
 
-        if (new Rectangle(centerX - 50, triggerY, triggerW, triggerH).Contains(point))
+        if (new Rectangle(X(168), Y(18), S(104), S(12)).Contains(point))
             return HoverRegion.LeftTrigger;
-        if (new Rectangle(centerX + 20, triggerY, triggerW, triggerH).Contains(point))
+        if (new Rectangle(X(348), Y(18), S(104), S(12)).Contains(point))
             return HoverRegion.RightTrigger;
 
-        if (PointInCircle(point, centerX, btnCenterY + btnSize + 4, btnRadius))
+        if (new Rectangle(dpadX - dpadUnit / 2, dpadY - dpadUnit * 2 - dpadUnit / 2, dpadUnit, dpadUnit * 2).Contains(point))
+            return HoverRegion.DPadUp;
+        if (new Rectangle(dpadX - dpadUnit / 2, dpadY + dpadUnit / 2, dpadUnit, dpadUnit * 2).Contains(point))
+            return HoverRegion.DPadDown;
+        if (new Rectangle(dpadX - dpadUnit * 2 - dpadUnit / 2, dpadY - dpadUnit / 2, dpadUnit * 2, dpadUnit).Contains(point))
+            return HoverRegion.DPadLeft;
+        if (new Rectangle(dpadX + dpadUnit / 2, dpadY - dpadUnit / 2, dpadUnit * 2, dpadUnit).Contains(point))
+            return HoverRegion.DPadRight;
+
+        if (PointInCircle(point, faceX, faceY + faceGap, faceRadius))
             return HoverRegion.AButton;
-        if (PointInCircle(point, centerX + btnSize + 4, btnCenterY, btnRadius))
+        if (PointInCircle(point, faceX + faceGap, faceY, faceRadius))
             return HoverRegion.BButton;
-        if (PointInCircle(point, centerX - btnSize - 4, btnCenterY, btnRadius))
+        if (PointInCircle(point, faceX - faceGap, faceY, faceRadius))
             return HoverRegion.XButton;
-        if (PointInCircle(point, centerX, btnCenterY - btnSize - 4, btnRadius))
+        if (PointInCircle(point, faceX, faceY - faceGap, faceRadius))
             return HoverRegion.YButton;
 
-        if (new Rectangle(centerX - 90, bumperY, 50, 14).Contains(point))
+        if (new Rectangle(X(168), Y(34), S(104), S(20)).Contains(point))
             return HoverRegion.LeftBumper;
-        if (new Rectangle(centerX + 40, bumperY, 50, 14).Contains(point))
+        if (new Rectangle(X(348), Y(34), S(104), S(20)).Contains(point))
             return HoverRegion.RightBumper;
-        if (new Rectangle(centerX - 40, h - 24, 30, 12).Contains(point))
+        if (new Rectangle(X(282), Y(108), S(36), S(16)).Contains(point))
             return HoverRegion.BackButton;
-        if (new Rectangle(centerX + 10, h - 24, 30, 12).Contains(point))
+        if (new Rectangle(X(322), Y(108), S(36), S(16)).Contains(point))
             return HoverRegion.StartButton;
 
         return HoverRegion.None;
@@ -452,10 +564,16 @@ public class ControllerStatePanel : UserControl
             HoverRegion.BButton => GetButtonText("B", "right face button", (_state.Buttons & XINPUT_GAMEPAD_B) != 0),
             HoverRegion.XButton => GetButtonText("X", "left face button", (_state.Buttons & XINPUT_GAMEPAD_X) != 0),
             HoverRegion.YButton => GetButtonText("Y", "top face button", (_state.Buttons & XINPUT_GAMEPAD_Y) != 0),
+            HoverRegion.DPadUp => GetButtonText("D-pad up", "menu/navigation button", (_state.Buttons & XINPUT_GAMEPAD_DPAD_UP) != 0),
+            HoverRegion.DPadDown => GetButtonText("D-pad down", "menu/navigation button", (_state.Buttons & XINPUT_GAMEPAD_DPAD_DOWN) != 0),
+            HoverRegion.DPadLeft => GetButtonText("D-pad left", "menu/navigation button", (_state.Buttons & XINPUT_GAMEPAD_DPAD_LEFT) != 0),
+            HoverRegion.DPadRight => GetButtonText("D-pad right", "menu/navigation button", (_state.Buttons & XINPUT_GAMEPAD_DPAD_RIGHT) != 0),
             HoverRegion.LeftBumper => GetButtonText("LB", "left bumper", (_state.Buttons & XINPUT_GAMEPAD_LEFT_SHOULDER) != 0),
             HoverRegion.RightBumper => GetButtonText("RB", "right bumper", (_state.Buttons & XINPUT_GAMEPAD_RIGHT_SHOULDER) != 0),
             HoverRegion.BackButton => GetButtonText("Back", "back/share button", (_state.Buttons & XINPUT_GAMEPAD_BACK) != 0),
             HoverRegion.StartButton => GetButtonText("Start", "start/options button", (_state.Buttons & XINPUT_GAMEPAD_START) != 0),
+            HoverRegion.LeftThumbButton => GetButtonText("Left stick click", "left thumb button", (_state.Buttons & XINPUT_GAMEPAD_LEFT_THUMB) != 0),
+            HoverRegion.RightThumbButton => GetButtonText("Right stick click", "right thumb button", (_state.Buttons & XINPUT_GAMEPAD_RIGHT_THUMB) != 0),
             _ => _baseToolTipText
         };
     }
@@ -470,6 +588,25 @@ public class ControllerStatePanel : UserControl
         int dx = point.X - centerX;
         int dy = point.Y - centerY;
         return (dx * dx) + (dy * dy) <= radius * radius;
+    }
+
+    private static System.Drawing.Drawing2D.GraphicsPath CreateRoundedRectangle(RectangleF rect, float radius)
+    {
+        float diameter = Math.Min(radius * 2f, Math.Min(rect.Width, rect.Height));
+        var path = new System.Drawing.Drawing2D.GraphicsPath();
+
+        if (diameter <= 0)
+        {
+            path.AddRectangle(rect);
+            return path;
+        }
+
+        path.AddArc(rect.Left, rect.Top, diameter, diameter, 180, 90);
+        path.AddArc(rect.Right - diameter, rect.Top, diameter, diameter, 270, 90);
+        path.AddArc(rect.Right - diameter, rect.Bottom - diameter, diameter, diameter, 0, 90);
+        path.AddArc(rect.Left, rect.Bottom - diameter, diameter, diameter, 90, 90);
+        path.CloseFigure();
+        return path;
     }
 
     private void ApplyPolledState(ControllerState state, bool connected)

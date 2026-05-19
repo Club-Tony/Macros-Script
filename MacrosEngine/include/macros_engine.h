@@ -7,8 +7,10 @@
   #else
     #define ENGINE_API __declspec(dllimport)
   #endif
+  #define ENGINE_CALLBACK __cdecl
 #else
   #define ENGINE_API
+  #define ENGINE_CALLBACK
 #endif
 
 #include <stdint.h>
@@ -42,6 +44,16 @@ typedef struct {
     uint32_t disc_pov_count;
     uint32_t axis_exists_mask; /* bitmask: X,Y,Z,RX,RY,RZ,SL0,SL1      */
 } VJoyState;
+
+/* ----------------------------------------------------------------
+ * Controller output
+ * ---------------------------------------------------------------- */
+typedef enum {
+    CONTROLLER_OUTPUT_VJOY     = 0,
+    CONTROLLER_OUTPUT_CALLBACK = 1,
+} ControllerOutputMode;
+
+typedef bool (ENGINE_CALLBACK *ControllerOutputCallback)(const ControllerState *state);
 
 /* ----------------------------------------------------------------
  * Event types
@@ -124,6 +136,13 @@ ENGINE_API void        Engine_PausePlayback(void);
 ENGINE_API void        Engine_ResumePlayback(void);
 ENGINE_API bool        Engine_IsPlaying(void);
 ENGINE_API bool        Engine_IsPaused(void);
+
+/* Route EVENT_CONTROLLER playback events. vJoy remains the default;
+ * CALLBACK lets a host app emit controller state through another backend
+ * while the native player still owns timing and key/mouse dispatch. */
+ENGINE_API bool        Engine_SetControllerOutputMode(ControllerOutputMode mode);
+ENGINE_API ControllerOutputMode Engine_GetControllerOutputMode(void);
+ENGINE_API void        Engine_SetControllerOutputCallback(ControllerOutputCallback callback);
 
 /* ----------------------------------------------------------------
  * vJoy output

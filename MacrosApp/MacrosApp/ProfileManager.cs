@@ -75,6 +75,10 @@ public class ProfileManager
                     case "vjoypovmode":
                         current.VJoyPovMode = val;
                         break;
+                    case "controlleroutput":
+                        if (Enum.TryParse<ControllerOutputType>(val, true, out var output))
+                            current.ControllerOutput = output;
+                        break;
                 }
             }
         }
@@ -157,6 +161,7 @@ public class ProfileManager
             writer.WriteLine($"SendMode={profile.SendMode}");
             writer.WriteLine($"vJoyDeviceId={profile.VJoyDeviceId}");
             writer.WriteLine($"vJoyPovMode={profile.VJoyPovMode}");
+            writer.WriteLine($"ControllerOutput={profile.ControllerOutput}");
 
             if (!string.IsNullOrEmpty(profile.ProcessName))
                 writer.WriteLine($"Process={profile.ProcessName}");

@@ -17,4 +17,11 @@
           DestinationFiles="$(OutDir)MacrosEngine.dll" />
   </Target>
 
+  <ItemGroup>
+    <Reference Include="Nefarius.ViGEm.Client">
+      <HintPath>..\lib\Nefarius.ViGEm.Client.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
 </Project>
