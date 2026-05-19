@@ -1,6 +1,6 @@
 # Native Engine — Stretch Items from Completed Plan
 
-**Status:** In Progress (code complete 2026-04-28; all automatable verification green 2026-05-17 incl. .NET smoke; only physical-controller live parity gate pending)
+**Status:** In Progress (code complete 2026-04-28; all automatable verification green through 2026-05-18 incl. VirtualXbox smoke; only physical in-game parity gate pending)
 **Created:** 2026-04-24
 **Goal:** Implement the three deferred items the `native-controller-dll.md` plan called out as out-of-scope when it was marked complete on 2026-04-23.
 
@@ -59,7 +59,7 @@ AHK v1 baseline status after reload:
 - Keyboard/mouse recording and playback were previously exercised with `zz_smoke_v1_kbm` and passed.
 - A fresh controller slot, `zz_controller_xinput_pass`, saved with `has_controller=1`, `event_count=264`, and 74 `C|` controller rows.
 - Replaying `zz_controller_xinput_pass` through AHK v1 moved vJoy successfully, and MacrosApp also replayed that AHK v1 slot through vJoy successfully.
-- Caveat: this has not yet been proven inside an actual game. The current evidence is vJoy/desktop-level parity, not in-game behavior under a target title.
+- Caveat: Minecraft for Windows did not react to direct AHK->vJoy menu-navigation pulses (`POV down`, left-stick Y max, and left-stick Y min) even though physical controller D-pad input navigates the menu. This suggests the game is listening to XInput/GameInput rather than vJoy. The current AHK evidence is vJoy/desktop-level parity, not guaranteed in-game behavior under XInput-only titles.
 
 WinForms observation pass:
 
@@ -67,11 +67,24 @@ WinForms observation pass:
 - The controller viewer is present and wired as a read-only XInput status panel.
 - When launched directly from `MacrosApp/MacrosApp/bin/Debug/net8.0-windows`, the Saved Recordings list appeared empty. The code resolves the repo root by walking up from the executable path and then falling back to the current directory, so launch context affects whether repo-root `macros.ini` slots are visible. No C# changes were made because Claude is actively working on this area.
 
+## VirtualXbox Output Update - 2026-05-18
+
+- Implemented an additional controller playback backend for MacrosApp: recorded `EVENT_CONTROLLER` rows can now route through a managed ViGEm virtual Xbox 360 controller instead of vJoy.
+- The native C playback thread still owns scheduling and keyboard/mouse dispatch. It now exposes a callback output mode so the WinForms host can emit only controller state through ViGEm without rewriting playback timing.
+- MacrosApp Settings now includes `Controller out:` with `VJoy` and `VirtualXbox`. `profiles.ini` can also set `ControllerOutput=VirtualXbox`.
+- `MacrosApp/lib/Nefarius.ViGEm.Client.dll` is copied into the app output so the backend does not depend on DS4Windows' install folder at runtime.
+- Automated verification:
+  - `cmake --build build-x64`: PASS.
+  - `MacrosEngine/build-x64/test_engine.exe`: PASS, 105/105, including the new native controller-output callback test.
+  - `MacrosEngine/build-x64/test_xinput_diff.exe`: PASS, 37/37.
+  - `dotnet build MacrosApp/MacrosApp/MacrosApp.csproj --no-restore`: PASS, 0 warnings/errors.
+  - `MacrosApp.Smoke`: PASS with default vJoy path.
+  - `MACROS_SMOKE_VIRTUAL_XBOX=1 MacrosApp.Smoke`: PASS; start status `Playing: smoke-slot (VirtualXbox)`, final status/state `Idle`, no engine playback left running.
+
 ## Remaining Acceptance Gate
 
 - Record a real mixed keyboard + mouse + controller macro in MacrosApp and confirm the saved event file contains `C|` controller rows.
-- Restart MacrosApp and replay that mixed slot through vJoy; confirm output in `joy.cpl`.
-- Run the AHK v1 controller macro in a real target game and confirm the target sees the intended controller behavior, not only vJoy movement.
+- Restart MacrosApp and replay that mixed slot through both vJoy and VirtualXbox; confirm vJoy output in `joy.cpl` and confirm VirtualXbox output in an XInput-only game such as Minecraft for Windows.
 - Load an AHK v1-recorded controller slot in MacrosApp and confirm controller playback maps through vJoy with no skipped-controller log messages.
 - Temporarily run without vJoy available and confirm MacrosApp warns clearly while staying stable.
 - After those manual checks pass, move this plan to `Plans/Completed/`.

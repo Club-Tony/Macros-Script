@@ -26,6 +26,8 @@
 
 static int  tests_run    = 0;
 static int  tests_passed = 0;
+static volatile LONG g_controller_callback_count = 0;
+static ControllerState g_controller_callback_state;
 
 #define CHECK(cond, msg) do {                                   \
     tests_run++;                                                \
@@ -41,6 +43,16 @@ static void print_controller(const ControllerState *cs)
            cs->left_trigger, cs->right_trigger,
            cs->left_thumb_x, cs->left_thumb_y,
            cs->right_thumb_x, cs->right_thumb_y);
+}
+
+static bool test_controller_output_callback(const ControllerState *state)
+{
+    if (!state)
+        return false;
+
+    g_controller_callback_state = *state;
+    InterlockedIncrement(&g_controller_callback_count);
+    return true;
 }
 
 /* ------- tests ------- */
@@ -305,6 +317,45 @@ static void test_vjoy_api(void)
     CHECK(!Engine_IsPlaying(), "Controller playback completes");
 }
 
+static void test_controller_output_callback_api(void)
+{
+    printf("\n[controller output callback]\n");
+
+    memset(&g_controller_callback_state, 0, sizeof(g_controller_callback_state));
+    InterlockedExchange(&g_controller_callback_count, 0);
+
+    Engine_SetControllerOutputCallback(test_controller_output_callback);
+    CHECK(Engine_SetControllerOutputMode(CONTROLLER_OUTPUT_CALLBACK),
+          "Controller output switches to callback mode");
+    CHECK(Engine_GetControllerOutputMode() == CONTROLLER_OUTPUT_CALLBACK,
+          "Controller output mode reports callback");
+
+    MacroEvent evts[1];
+    memset(evts, 0, sizeof(evts));
+    evts[0].type = EVENT_CONTROLLER;
+    evts[0].timestamp_us = 0;
+    evts[0].data.controller.connected = true;
+    evts[0].data.controller.buttons = XINPUT_GAMEPAD_A;
+    evts[0].data.controller.left_thumb_x = 1234;
+    evts[0].data.controller.right_trigger = 64;
+
+    CHECK(Engine_StartPlayback(evts, 1, 1),
+          "Controller callback playback starts");
+    Sleep(100);
+    CHECK(!Engine_IsPlaying(), "Controller callback playback completes");
+    CHECK(g_controller_callback_count >= 1, "Controller callback was invoked");
+    CHECK(g_controller_callback_state.buttons == XINPUT_GAMEPAD_A,
+          "Controller callback received buttons");
+    CHECK(g_controller_callback_state.left_thumb_x == 1234,
+          "Controller callback received left thumb X");
+    CHECK(g_controller_callback_state.right_trigger == 64,
+          "Controller callback received right trigger");
+
+    CHECK(Engine_SetControllerOutputMode(CONTROLLER_OUTPUT_VJOY),
+          "Controller output switches back to vJoy");
+    Engine_SetControllerOutputCallback(NULL);
+}
+
 static void test_ahk_v1_format(void)
 {
     printf("\n[AHK v1 format round-trip]\n");
@@ -453,6 +504,7 @@ int main(void)
     test_playback_cancel();
     test_playback_cancel_midsleep();
     test_vjoy_api();
+    test_controller_output_callback_api();
     test_ahk_v1_format();
     test_vjoy_disabled();
     test_edge_cases();

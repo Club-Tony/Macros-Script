@@ -34,6 +34,8 @@ partial class MainForm
     private NumericUpDown nudInterval = null!;
     private Label lblSendMode = null!;
     private ComboBox cmbSendMode = null!;
+    private Label lblControllerOutput = null!;
+    private ComboBox cmbControllerOutput = null!;
     private Label lblLoopCount = null!;
     private NumericUpDown nudLoopCount = null!;
 
@@ -210,14 +212,15 @@ partial class MainForm
         var settingsInner = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = 110,
+            Height = 142,
             ColumnCount = 2,
-            RowCount = 3,
+            RowCount = 4,
             BackColor = bgDark,
             Padding = new Padding(4, 4, 4, 4)
         };
         settingsInner.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
         settingsInner.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        settingsInner.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         settingsInner.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         settingsInner.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         settingsInner.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
@@ -260,6 +263,24 @@ partial class MainForm
         cmbSendMode.Items.AddRange(new object[] { "Input", "Play", "Event" });
         cmbSendMode.SelectedIndex = 0;
 
+        lblControllerOutput = new Label
+        {
+            Text = "Controller out:",
+            ForeColor = fgMain,
+            Dock = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft
+        };
+        cmbControllerOutput = new ComboBox
+        {
+            Dock = DockStyle.Fill,
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            BackColor = bgControl,
+            ForeColor = fgMain,
+            FlatStyle = FlatStyle.Flat
+        };
+        cmbControllerOutput.Items.AddRange(new object[] { "VJoy", "VirtualXbox" });
+        cmbControllerOutput.SelectedIndex = 0;
+
         lblLoopCount = new Label
         {
             Text = "Loop count:",
@@ -283,8 +304,10 @@ partial class MainForm
         settingsInner.Controls.Add(nudInterval, 1, 0);
         settingsInner.Controls.Add(lblSendMode, 0, 1);
         settingsInner.Controls.Add(cmbSendMode, 1, 1);
-        settingsInner.Controls.Add(lblLoopCount, 0, 2);
-        settingsInner.Controls.Add(nudLoopCount, 1, 2);
+        settingsInner.Controls.Add(lblControllerOutput, 0, 2);
+        settingsInner.Controls.Add(cmbControllerOutput, 1, 2);
+        settingsInner.Controls.Add(lblLoopCount, 0, 3);
+        settingsInner.Controls.Add(nudLoopCount, 1, 3);
 
         settingsPanel.Controls.Add(settingsInner);
         settingsPanel.Controls.Add(settingsHeaderLabel);
