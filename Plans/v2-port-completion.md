@@ -1,6 +1,6 @@
 # AHK v2 Port Completion
 
-**Status:** In Progress (implementation and parse smoke complete 2026-05-09; live controller/vJoy verification pending)
+**Status:** In Progress (implementation complete; slot-metadata parity fix + parse smoke green 2026-05-20; live controller/vJoy verification pending)
 **Created:** 2026-04-24
 **Goal:** Bring `Macros_v2.ahk` + `Lib_v2/` to feature parity with `Macros.ahk` + `Lib/`.
 
@@ -74,6 +74,7 @@ Reactivated 2026-04-28 by explicit user request to proceed with the AHK v2 plan 
 | Controller polling loop | Implemented - `ControllerComboPoll()` plus L1+L2+R1+R2 combos |
 | Turbo Hold (F3) | Implemented - keyboard and controller binding flow |
 | Pure Hold (F4) | Implemented - keyboard and controller binding flow |
+| Slot target-window metadata | Implemented 2026-05-20 - `has_controller` + `target_exe`/`target_client_w`/`target_client_h` persisted and restored across save, load, rename, export, and import |
 | Live controller/vJoy round-trip | Pending manual hardware verification |
 
 ## Solution / Scope
@@ -116,6 +117,21 @@ Unattended auto-test sweep (no live hardware). Tooling: AutoHotkey64 v2.0.18.
 - **Verification step 2 — AHK v2 parse/syntax check: PASS.** `Macros_v2.ahk` validated via `AutoHotkey64.exe /ErrorStdOut /iLib <tmp> Macros_v2.ahk` with working dir = repo root (so `Lib_v2\` `#Include`s resolve). Result: exit code 0, empty stderr. Confirms the plan's prior parse-smoke claim. (Note: AHK exit codes are unreliable when launched via MSYS-bash pipes — verified through PowerShell `Start-Process -PassThru` with redirected stderr; calibrated against known-good and deliberately-broken probe scripts.)
 - **Verification step 4 — v1→v2 slot cross-compatibility, static format-equivalence diff (partial automatable substitute for the live byte-identity gate):**
   - **Event-data file (`macros_events/*.txt`): byte-identical by construction. PASS.** `Lib/Slots.ahk` and `Lib_v2/Slots.ahk` use the same write (`FileAppend line + "\n"` per event) and the same read (`StrSplit/loop-parse on "\n", strip "\r", Trim, skip blank and ";"-comment lines`). A v1-recorded events file round-trips through v2 identically.
-  - **Slot INI metadata: DIVERGENCE — flag for the manual tester.** v1 `SaveSlot` persists `event_count, coord_mode, has_controller, target_exe, target_client_w, target_client_h, recorded`; the v2 `Lib_v2/Slots.ahk` save path writes only `event_count, coord_mode, recorded`, and `recorded` is date-only (`FormatTime(,"yyyy-MM-dd")`) vs v1's fuller timestamp. Event playback is unaffected (the event stream is identical), but **target-window remap metadata and controller-presence flag are not written by v2** — verify during the live parity gate whether v2 still remaps coordinates correctly for a v1 slot recorded against a specific target window.
+  - **Slot INI metadata: DIVERGENCE — RESOLVED 2026-05-20 (see "Slot Metadata Parity Fix - 2026-05-20" below).** *[Original 2026-05-16 finding follows; note its "fuller timestamp" claim is corrected in the resolution section.]* v1 `SaveSlot` persists `event_count, coord_mode, has_controller, target_exe, target_client_w, target_client_h, recorded`; the v2 `Lib_v2/Slots.ahk` save path writes only `event_count, coord_mode, recorded`, and `recorded` is date-only (`FormatTime(,"yyyy-MM-dd")`) vs v1's fuller timestamp. Event playback is unaffected (the event stream is identical), but **target-window remap metadata and controller-presence flag are not written by v2** — verify during the live parity gate whether v2 still remaps coordinates correctly for a v1 slot recorded against a specific target window.
 
 **Still manual-only (unchanged):** verification steps 1 (TESTING.md authoring) and 3 (live-exercise), plus the live controller + vJoy round-trip and a true byte-identical comparison of a freshly v1-recorded slot — these require live input capture and hardware and remain the open parity gate.
+
+## Slot Metadata Parity Fix - 2026-05-20
+
+Closed the slot-metadata divergence flagged in the 2026-05-16 run. The v2 slot save path now persists and restores the full v1 metadata set.
+
+- **`Lib_v2/Slots.ahk` `Save()`** — writes `has_controller`, `target_exe`, `target_client_w`, `target_client_h` alongside `event_count`/`coord_mode`/`recorded`. Target keys are filled from the `recorderTarget*` globals when `coord_mode = "client"`, zero/empty otherwise — mirroring v1 `SlotSave`.
+- **`Lib_v2/Slots.ahk` `ExportAll()` / `ImportAll()`** — carry all four keys through the export file and back, matching v1's export format.
+- **`Macros_v2.ahk` `LoadRecorderSlot()`** — reads `target_exe`/`target_client_w`/`target_client_h` back and restores `recorderTargetExe`/`recorderTargetClientW`/`recorderTargetClientH`.
+- **`Lib_v2/MacroGui.ahk` rename path** — loads the source slot before re-saving so a renamed `client`-mode slot keeps its target-window context instead of stale globals.
+
+**Why it mattered (functional bug, not cosmetic):** before the fix, a saved `client`-coord-mode slot loaded in v2 left `recorderTargetExe` empty; `RecorderPlayNext`'s focus check (`activeExe != recorderTargetExe`) then stopped playback immediately with "focus lost", making client-mode slots effectively unplayable after a load-from-disk.
+
+**Correction to the 2026-05-16 note:** v2's `recorded` field (`FormatTime(, "yyyy-MM-dd")`) is **identical** to v1 — v1's `SlotSave` also writes date-only (`FormatTime, nowStr,, yyyy-MM-dd`). The earlier "v1's fuller timestamp" claim was wrong; there is no `recorded` timestamp divergence.
+
+**Verification:** `AutoHotkey64.exe /validate /ErrorStdOut Macros_v2.ahk` exits 0 with empty stderr after all six edits (calibrated against known-good and deliberately-broken probes). The save→load→playback round-trip with a real `client`-mode slot remains part of the open live controller/vJoy gate.

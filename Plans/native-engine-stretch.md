@@ -1,6 +1,6 @@
 # Native Engine — Stretch Items from Completed Plan
 
-**Status:** In Progress (code complete 2026-04-28; all automatable verification green through 2026-05-18 incl. VirtualXbox smoke; only physical in-game parity gate pending)
+**Status:** In Progress (code complete 2026-04-28; all automatable verification green through 2026-05-20 incl. VirtualXbox smoke; only physical in-game parity gate pending)
 **Created:** 2026-04-24
 **Goal:** Implement the three deferred items the `native-controller-dll.md` plan called out as out-of-scope when it was marked complete on 2026-04-23.
 
@@ -168,3 +168,15 @@ Closes the previously KNOWN-SKIPPED .NET smoke gate without any manual testing, 
 - Re-confirmed alongside the 2026-05-16 native results: `test_engine.exe` 96/96, `test_xinput_diff.exe` 37/37 (re-run 2026-05-17, still PASS, exit 0).
 
 **Net:** every automatable gate for E1/E2/E3 is now green. The sole remaining gate is the genuinely-physical one: live-exercise with a real Xbox/PS4 controller and an *enabled* vJoy device (here `vjoy_ready=False`, so observable `joy.cpl` deflection and true hardware recording fidelity still need a human + configured vJoy). Not marking the plan Completed on that basis — but no code or tooling work remains.
+
+## Automated Verification Run - 2026-05-20
+
+Re-ran the full `macros` live suite (`run_live_tests.py macros` from `Agent-Hub`) against current `feature/gui-panel`. All stages green, consistent with the 2026-05-18 results:
+
+- `cmake` configure + build: PASS — all 3 targets (`MacrosEngine`, `test_engine`, `test_xinput_diff`).
+- `test_engine.exe`: PASS, 105 / 105.
+- `dotnet build MacrosApp/MacrosApp/MacrosApp.csproj`: PASS, 0 warnings / 0 errors.
+- `MacrosApp.Smoke`: PASS — record→persist→playback→Idle round-trip, `vjoy_available=True vjoy_ready=True`.
+- `Validate-Tooltips.ps1`: PASS, 14 / 14.
+
+No native-engine or MacrosApp code changed in this session — this is a freshness re-confirmation. The physical in-game parity gate (Remaining Acceptance Gate above) is unchanged and still open.
