@@ -1036,11 +1036,16 @@ RecorderEventsHaveController(events) {
 
 LoadRecorderSlot(slotName, showTip := true) {
     global slots, recorderEvents, recorder, recorderMouseCoordSpace, recorderHasControllerEvents
+    global recorderTargetExe, recorderTargetClientW, recorderTargetClientH
     events := slots.Load(slotName)
     if (IsObject(events) && events.Length > 0) {
         recorderEvents := events
         recorder.slotName := slotName
-        recorderMouseCoordSpace := IniRead(A_ScriptDir "\macros.ini", slotName, "coord_mode", "screen")
+        iniPath := A_ScriptDir "\macros.ini"
+        recorderMouseCoordSpace := IniRead(iniPath, slotName, "coord_mode", "screen")
+        recorderTargetExe := IniRead(iniPath, slotName, "target_exe", "")
+        recorderTargetClientW := IniRead(iniPath, slotName, "target_client_w", 0) + 0
+        recorderTargetClientH := IniRead(iniPath, slotName, "target_client_h", 0) + 0
         recorderHasControllerEvents := RecorderEventsHaveController(events)
         if showTip
             ShowMacroToggledTip("Slot '" slotName "' loaded | F12 to play", 2000, false)

@@ -432,6 +432,7 @@ MacroGuiSlotListRename(*) {
         return
     }
     coordMode := IniRead(A_ScriptDir "\macros.ini", oldName, "coord_mode", "screen")
+    LoadRecorderSlot(oldName, false)
     slots.Save(newName, events, coordMode)
     slots.Delete(oldName)
     LoadRecorderSlot(newName, false)

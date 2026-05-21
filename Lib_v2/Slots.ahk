@@ -17,6 +17,7 @@ class SlotManager {
     ; SAVE
     ; ──────────────────────────────────────────────────────────────────────────
     Save(slotName, events, coordMode := "screen") {
+        global recorderTargetExe, recorderTargetClientW, recorderTargetClientH
         iniPath    := A_ScriptDir "\macros.ini"
         backupPath := A_ScriptDir "\macros.ini.bak"
         eventsDir  := A_ScriptDir "\macros_events"
@@ -63,6 +64,10 @@ class SlotManager {
         }
         IniWrite eventCount, iniPath, slotName, "event_count"
         IniWrite coordMode, iniPath, slotName, "coord_mode"
+        IniWrite (RecorderEventsHaveController(events) ? 1 : 0), iniPath, slotName, "has_controller"
+        IniWrite (coordMode = "client" ? recorderTargetExe : ""), iniPath, slotName, "target_exe"
+        IniWrite (coordMode = "client" ? recorderTargetClientW : 0), iniPath, slotName, "target_client_w"
+        IniWrite (coordMode = "client" ? recorderTargetClientH : 0), iniPath, slotName, "target_client_h"
         IniWrite FormatTime(, "yyyy-MM-dd"), iniPath, slotName, "recorded"
 
         ShowMacroToggledTip("Saved '" slotName "' ✓ | F12 to play", 3000, false)
@@ -162,10 +167,18 @@ class SlotManager {
             iniPath   := A_ScriptDir "\macros.ini"
             evtCount  := IniRead(iniPath, name, "event_count", 0)
             coordMode := IniRead(iniPath, name, "coord_mode", "screen")
+            hasCtrl   := IniRead(iniPath, name, "has_controller", 0)
+            targetExe := IniRead(iniPath, name, "target_exe", "")
+            targetW   := IniRead(iniPath, name, "target_client_w", 0)
+            targetH   := IniRead(iniPath, name, "target_client_h", 0)
             recorded  := IniRead(iniPath, name, "recorded", "")
             FileAppend "[" name "]`n", exportPath
             FileAppend "event_count=" evtCount "`n", exportPath
             FileAppend "coord_mode=" coordMode "`n", exportPath
+            FileAppend "has_controller=" hasCtrl "`n", exportPath
+            FileAppend "target_exe=" targetExe "`n", exportPath
+            FileAppend "target_client_w=" targetW "`n", exportPath
+            FileAppend "target_client_h=" targetH "`n", exportPath
             FileAppend "recorded=" recorded "`n", exportPath
             eventsPath := A_ScriptDir "\macros_events\" name ".txt"
             if FileExist(eventsPath) {
@@ -206,6 +219,10 @@ class SlotManager {
                 continue
             evtCount  := IniRead(importPath, sec, "event_count", 0)
             coordMode := IniRead(importPath, sec, "coord_mode", "screen")
+            hasCtrl   := IniRead(importPath, sec, "has_controller", 0)
+            targetExe := IniRead(importPath, sec, "target_exe", "")
+            targetW   := IniRead(importPath, sec, "target_client_w", 0)
+            targetH   := IniRead(importPath, sec, "target_client_h", 0)
             recorded  := IniRead(importPath, sec, "recorded", "")
             events := []
             loop evtCount {
@@ -260,6 +277,10 @@ class SlotManager {
             }
             IniWrite events.Length, iniPath, finalName, "event_count"
             IniWrite coordMode, iniPath, finalName, "coord_mode"
+            IniWrite hasCtrl, iniPath, finalName, "has_controller"
+            IniWrite targetExe, iniPath, finalName, "target_exe"
+            IniWrite targetW, iniPath, finalName, "target_client_w"
+            IniWrite targetH, iniPath, finalName, "target_client_h"
             IniWrite recorded, iniPath, finalName, "recorded"
             imported++
         }
