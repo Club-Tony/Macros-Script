@@ -10,3 +10,6 @@ tests/live/artifacts/
 macros.ini
 macros_events/*.txt
 macros.ini.bak
+
+# AHK validation artifacts (/ErrorStdOut, /iLib, /validate error output)
+*.err
