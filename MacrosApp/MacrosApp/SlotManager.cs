@@ -208,11 +208,15 @@ public class SlotManager
     {
         var ini = LoadIniDocument();
         var existingSlotNames = GetRegisteredSlotNames(ini);
+        var desiredSlotNames = slots
+            .Select(slot => SanitizeSlotName(slot.Name))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         RemoveSection(ini, "Slots");
         foreach (var existingSlotName in existingSlotNames)
         {
-            RemoveSection(ini, existingSlotName);
+            if (!desiredSlotNames.Contains(SanitizeSlotName(existingSlotName)))
+                RemoveSection(ini, existingSlotName);
         }
 
         var slotsSection = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -231,16 +235,18 @@ public class SlotManager
         foreach (var slot in slots)
         {
             string slotName = SanitizeSlotName(slot.Name);
+            var slotSection = ini.Sections.TryGetValue(slotName, out var existingSection)
+                ? new Dictionary<string, string>(existingSection, StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            slotSection["event_count"] = slot.EventCount.ToString();
+            slotSection["coord_mode"] = slot.CoordMode;
+            slotSection["recorded"] = slot.Recorded;
+
             InsertSection(
                 ini,
                 insertIndex++,
                 slotName,
-                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                {
-                    ["event_count"] = slot.EventCount.ToString(),
-                    ["coord_mode"] = slot.CoordMode,
-                    ["recorded"] = slot.Recorded
-                });
+                slotSection);
         }
 
         CreateIniBackup();
