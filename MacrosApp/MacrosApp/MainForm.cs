@@ -83,24 +83,38 @@ public partial class MainForm : Form
 
     private void InitializeManagers()
     {
-        // Base path is the Macros-Script repo root (parent of MacrosApp)
-        string basePath = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", ".."));
-
-        // Fallback: check if macros.ini exists relative to executable
-        if (!File.Exists(Path.Combine(basePath, "macros.ini")))
-        {
-            // Try current directory
-            basePath = Directory.GetCurrentDirectory();
-            if (!File.Exists(Path.Combine(basePath, "macros.ini")))
-            {
-                // Use exe directory as last resort
-                basePath = AppDomain.CurrentDomain.BaseDirectory;
-            }
-        }
+        string basePath = ResolveWorkspaceRoot();
 
         _slotManager = new SlotManager(basePath);
         _profileManager = new ProfileManager(basePath);
         _hotkeyManager = new HotkeyManager(this.Handle);
+    }
+
+    private static string ResolveWorkspaceRoot()
+    {
+        string? currentRoot = FindMacroWorkspaceRoot(Directory.GetCurrentDirectory());
+        if (currentRoot != null)
+            return currentRoot;
+
+        string? executableRoot = FindMacroWorkspaceRoot(AppDomain.CurrentDomain.BaseDirectory);
+        if (executableRoot != null)
+            return executableRoot;
+
+        return AppDomain.CurrentDomain.BaseDirectory;
+    }
+
+    private static string? FindMacroWorkspaceRoot(string startPath)
+    {
+        var directory = new DirectoryInfo(Path.GetFullPath(startPath));
+        while (directory != null)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "macros.ini")))
+                return directory.FullName;
+
+            directory = directory.Parent;
+        }
+
+        return null;
     }
 
     private void WireEvents()
