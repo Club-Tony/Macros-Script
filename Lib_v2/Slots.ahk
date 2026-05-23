@@ -21,12 +21,12 @@ class SlotManager {
         iniPath    := A_ScriptDir "\macros.ini"
         backupPath := A_ScriptDir "\macros.ini.bak"
         eventsDir  := A_ScriptDir "\macros_events"
-        eventsPath := eventsDir "\" slotName ".txt"
 
         slotName := RegExReplace(slotName, "[\\/:*?`"<>|]", "_")
         slotName := Trim(slotName)
         if (slotName = "")
             slotName := "untitled"
+        eventsPath := eventsDir "\" slotName ".txt"
 
         ; Backup
         if FileExist(iniPath)

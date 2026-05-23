@@ -776,6 +776,13 @@ MapTriggerAxis(value, axisMax) {
     return Round((value * axisMax) / 255)
 }
 
+ControllerResetVJoyState() {
+    global vJoyDeviceId, vJoyReady
+    if !vJoyReady
+        return
+    VJoy_ResetVJD(vJoyDeviceId)
+}
+
 ToggleRecorderPlayback() {
     global recorderPlaying, recorder
     if recorderPlaying
@@ -993,7 +1000,7 @@ StartPlayback(loopMode := "prompt") {
 
 StopPlayback(silent := false) {
     global recorderPlaying, recorderPaused, recorderPlayIndex
-    global recorderLoopTarget, recorderLoopCurrent
+    global recorderLoopTarget, recorderLoopCurrent, recorderHasControllerEvents
     global tray
     if !recorderPlaying
         return
@@ -1003,6 +1010,8 @@ StopPlayback(silent := false) {
     recorderPlayIndex   := 1
     recorderLoopTarget  := -1
     recorderLoopCurrent := 1
+    if recorderHasControllerEvents
+        ControllerResetVJoyState()
     tray.SetIcon("idle")
     if !silent
         ShowMacroToggledTip("Macro Toggled Off")
