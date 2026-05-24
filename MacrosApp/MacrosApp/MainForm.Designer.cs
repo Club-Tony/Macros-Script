@@ -38,6 +38,8 @@ partial class MainForm
     private ComboBox cmbControllerOutput = null!;
     private Label lblLoopCount = null!;
     private NumericUpDown nudLoopCount = null!;
+    private CheckBox chkKeepVirtualXbox = null!;
+    private Button btnControllerPulse = null!;
 
     // Controller panel
     private Panel controllerPanel = null!;
@@ -182,7 +184,7 @@ partial class MainForm
         var bottomSplit = new SplitContainer
         {
             Dock = DockStyle.Bottom,
-            Height = 230,
+            Height = 250,
             Orientation = Orientation.Vertical,
             BackColor = bgDark,
             SplitterWidth = 4,
@@ -212,9 +214,9 @@ partial class MainForm
         var settingsInner = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = 142,
+            Height = 202,
             ColumnCount = 2,
-            RowCount = 4,
+            RowCount = 6,
             BackColor = bgDark,
             Padding = new Padding(4, 4, 4, 4)
         };
@@ -224,6 +226,8 @@ partial class MainForm
         settingsInner.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         settingsInner.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         settingsInner.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+        settingsInner.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+        settingsInner.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
 
         lblInterval = new Label
         {
@@ -300,6 +304,34 @@ partial class MainForm
         };
         nudLoopCount.Controls[0].BackColor = bgControl;
 
+        chkKeepVirtualXbox = new CheckBox
+        {
+            Text = "Keep Xbox live",
+            Dock = DockStyle.Fill,
+            ForeColor = fgMain,
+            BackColor = bgDark,
+            FlatStyle = FlatStyle.Flat,
+            Margin = new Padding(0, 2, 0, 2),
+            TextAlign = ContentAlignment.MiddleLeft
+        };
+
+        btnControllerPulse = new Button
+        {
+            Text = "Test D-pad pulse",
+            Dock = DockStyle.Fill,
+            FlatStyle = FlatStyle.Flat,
+            BackColor = btnBg,
+            ForeColor = fgMain,
+            Font = new Font("Segoe UI", 8f),
+            Margin = new Padding(0, 3, 0, 1),
+            Cursor = Cursors.Hand,
+            TextAlign = ContentAlignment.MiddleCenter
+        };
+        btnControllerPulse.FlatAppearance.BorderColor = Color.FromArgb(70, 70, 70);
+        btnControllerPulse.FlatAppearance.BorderSize = 1;
+        btnControllerPulse.FlatAppearance.MouseOverBackColor = btnHover;
+        btnControllerPulse.FlatAppearance.MouseDownBackColor = Color.FromArgb(40, 60, 100);
+
         settingsInner.Controls.Add(lblInterval, 0, 0);
         settingsInner.Controls.Add(nudInterval, 1, 0);
         settingsInner.Controls.Add(lblSendMode, 0, 1);
@@ -308,6 +340,10 @@ partial class MainForm
         settingsInner.Controls.Add(cmbControllerOutput, 1, 2);
         settingsInner.Controls.Add(lblLoopCount, 0, 3);
         settingsInner.Controls.Add(nudLoopCount, 1, 3);
+        settingsInner.Controls.Add(chkKeepVirtualXbox, 0, 4);
+        settingsInner.SetColumnSpan(chkKeepVirtualXbox, 2);
+        settingsInner.Controls.Add(btnControllerPulse, 0, 5);
+        settingsInner.SetColumnSpan(btnControllerPulse, 2);
 
         settingsPanel.Controls.Add(settingsInner);
         settingsPanel.Controls.Add(settingsHeaderLabel);

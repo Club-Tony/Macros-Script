@@ -1,5 +1,6 @@
 using MacrosApp.Controls;
 using MacrosApp.Models;
+using System.Diagnostics;
 using System.Threading;
 
 namespace MacrosApp;
@@ -38,7 +39,14 @@ public partial class MainForm : Form
     private Keys _configuredHoldKey = Keys.None;
     private string _configuredHoldKeyLabel = string.Empty;
     private bool _holdMacroEngaged;
+    private bool _controllerPulseActive;
     private int _turboRepeatMs = 40;
+    private Panel _statusOverlay = null!;
+    private Panel _statusOverlayAccent = null!;
+    private Label _statusOverlayLabel = null!;
+    private System.Windows.Forms.Timer _statusOverlayTimer = null!;
+    private int _statusOverlayFrame;
+    private Color _statusOverlayBaseColor;
 
     // Current macro state
     private MacroState _currentState = MacroState.Idle;
@@ -68,6 +76,7 @@ public partial class MainForm : Form
     public MainForm()
     {
         InitializeComponent();
+        InitializeStatusOverlay();
         InitializeToolTips();
         InitializeManagers();
         WireEvents();
@@ -158,10 +167,17 @@ public partial class MainForm : Form
             if (Enum.TryParse<ControllerOutputType>(cmbControllerOutput.SelectedItem?.ToString(), out var output))
                 _settings.ControllerOutput = output;
             ClearComboSelectionHighlight(cmbControllerOutput);
+            ApplyVirtualXboxConnectionPreference(showStatus: false);
         };
         cmbSendMode.DropDownClosed += (_, _) => ClearComboSelectionHighlight(cmbSendMode);
         cmbControllerOutput.DropDownClosed += (_, _) => ClearComboSelectionHighlight(cmbControllerOutput);
         nudLoopCount.ValueChanged += (_, _) => _settings.LoopCount = (int)nudLoopCount.Value;
+        chkKeepVirtualXbox.CheckedChanged += (_, _) =>
+        {
+            _settings.KeepVirtualXboxConnected = chkKeepVirtualXbox.Checked;
+            ApplyVirtualXboxConnectionPreference(showStatus: true);
+        };
+        btnControllerPulse.Click += async (_, _) => await RunControllerPulseAsync();
     }
 
     private void ClearComboSelectionHighlight(ComboBox combo)
@@ -238,6 +254,10 @@ public partial class MainForm : Form
             "How many times a selected recording should replay. 0 means loop until you stop it.");
         _hoverHelp.SetToolTip(nudLoopCount,
             "Sets the playback loop count for selected recording slots. Use 0 for infinite playback.");
+        _hoverHelp.SetToolTip(chkKeepVirtualXbox,
+            "Keeps the ViGEm virtual Xbox controller connected after playback so games can bind to it before a macro runs.");
+        _hoverHelp.SetToolTip(btnControllerPulse,
+            "Sends a short controller-only D-pad Down pulse through the selected output backend.");
 
         _hoverHelp.SetToolTip(controllerHeaderLabel,
             "Live controller viewer fed by the native engine's XInput polling. If no controller is turned on, this panel waits quietly until one appears.");
@@ -311,6 +331,7 @@ public partial class MainForm : Form
             {
                 controllerState.StartRefresh();
                 SetControllerViewerWaiting();
+                ApplyVirtualXboxConnectionPreference(showStatus: false);
             }
             else
             {
@@ -353,6 +374,8 @@ public partial class MainForm : Form
 
     private void MainForm_Resize(object? sender, EventArgs e)
     {
+        PositionStatusOverlay();
+
         if (WindowState == FormWindowState.Minimized)
         {
             MinimizeToTray();
@@ -643,7 +666,7 @@ public partial class MainForm : Form
 
             if (!NativeEngine.TryStartPlayback(buffer, count, (uint)Math.Max(0, _settings.LoopCount)))
             {
-                NativeEngine.TryResetControllerOutput();
+                ResetControllerOutputAfterPlayback();
                 SetState(MacroState.Idle, $"Playback failed: {slot.Name}");
                 return;
             }
@@ -716,6 +739,150 @@ public partial class MainForm : Form
         outputReady = NativeEngine.TryGetVJoyState(out var vJoyState) && vJoyState.Ready;
         status = outputReady ? "vJoy" : "vJoy unavailable";
         return true;
+    }
+
+    private bool ShouldKeepVirtualXboxConnected =>
+        _settings.KeepVirtualXboxConnected &&
+        _settings.ControllerOutput == ControllerOutputType.VirtualXbox;
+
+    private void ApplyVirtualXboxConnectionPreference(bool showStatus)
+    {
+        if (ShouldKeepVirtualXboxConnected)
+        {
+            if (NativeEngine.TryEnsureVirtualXboxConnected(out var error))
+            {
+                if (showStatus)
+                    SetState(MacroState.Idle, "VirtualXbox kept live");
+                return;
+            }
+
+            if (showStatus)
+            {
+                string status = string.IsNullOrWhiteSpace(error)
+                    ? "VirtualXbox unavailable"
+                    : $"VirtualXbox unavailable: {error}";
+                SetState(MacroState.Idle, status);
+            }
+
+            return;
+        }
+
+        if (!_slotPlaybackActive && !_controllerPulseActive && !NativeEngine.TryIsPlaying())
+            NativeEngine.TryResetControllerOutput(disconnectVirtualXbox: true);
+
+        if (showStatus)
+            SetState(MacroState.Idle, "VirtualXbox persistence off");
+    }
+
+    private async Task RunControllerPulseAsync()
+    {
+        if (_controllerPulseActive)
+            return;
+
+        if (_activeMacroType == MacroType.Recorder)
+        {
+            SetState(MacroState.Recording, "Finish recording before controller test");
+            return;
+        }
+
+        if (NativeEngine.TryIsPlaying())
+        {
+            SetState(MacroState.Playing, "Stop playback before controller test");
+            return;
+        }
+
+        if (!NativeEngine.TryInit())
+        {
+            SetState(MacroState.Idle, "Engine unavailable");
+            return;
+        }
+
+        NativeEngine.TrySetVJoyDeviceId((uint)_settings.VJoyDeviceId);
+
+        string pulsePath = Path.Combine(
+            Path.GetTempPath(),
+            "MacrosApp-controller-pulse-" + Guid.NewGuid().ToString("N") + ".txt");
+        IntPtr buffer = IntPtr.Zero;
+        uint count = 0;
+        string outputStatus = string.Empty;
+        bool outputReady = true;
+
+        try
+        {
+            File.WriteAllLines(pulsePath, new[]
+            {
+                "C|2|0|0|0|0|0|0|0",
+                "C|0|0|0|0|0|0|0|180"
+            });
+
+            if (!NativeEngine.TryLoadPlaybackBuffer(pulsePath, out buffer, out count) || count == 0)
+            {
+                SetState(MacroState.Idle, "Controller pulse failed to load");
+                return;
+            }
+
+            if (!TryPrepareControllerOutputForPlayback(
+                    hasControllerEvents: true,
+                    out outputReady,
+                    out outputStatus))
+            {
+                SetState(MacroState.Idle, outputStatus);
+                return;
+            }
+
+            if (!NativeEngine.TryStartPlayback(buffer, count, loopCount: 1))
+            {
+                ResetControllerOutputAfterPlayback();
+                SetState(MacroState.Idle, "Controller pulse failed");
+                return;
+            }
+
+            _controllerPulseActive = true;
+            btnControllerPulse.Enabled = false;
+            SetState(MacroState.Playing, $"Controller pulse ({outputStatus})");
+
+            var stopwatch = Stopwatch.StartNew();
+            while (stopwatch.Elapsed < TimeSpan.FromSeconds(3) && NativeEngine.TryIsPlaying())
+                await Task.Delay(50);
+
+            if (NativeEngine.TryIsPlaying())
+            {
+                NativeEngine.TryStopPlayback();
+                SetState(MacroState.Idle, "Controller pulse timed out");
+            }
+            else
+            {
+                string status = string.IsNullOrWhiteSpace(outputStatus)
+                    ? "Controller pulse sent"
+                    : $"Controller pulse sent ({outputStatus})";
+                if (!outputReady)
+                    status = string.IsNullOrWhiteSpace(outputStatus)
+                        ? "Controller pulse sent, output unavailable"
+                        : $"Controller pulse sent ({outputStatus})";
+                SetState(MacroState.Idle, status);
+            }
+        }
+        finally
+        {
+            if (buffer != IntPtr.Zero)
+                NativeEngine.FreePlaybackBuffer(buffer);
+
+            try
+            {
+                if (File.Exists(pulsePath))
+                    File.Delete(pulsePath);
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+
+            _controllerPulseActive = false;
+            btnControllerPulse.Enabled = true;
+            ResetControllerOutputAfterPlayback();
+        }
     }
 
     private void CancelCurrentOperation()
@@ -1257,8 +1424,51 @@ public partial class MainForm : Form
     // UI HELPERS
     // ================================================================
 
+    private void InitializeStatusOverlay()
+    {
+        _statusOverlayBaseColor = Color.FromArgb(18, 18, 18);
+
+        _statusOverlay = new Panel
+        {
+            BackColor = _statusOverlayBaseColor,
+            Dock = DockStyle.Fill,
+            Visible = false
+        };
+
+        _statusOverlayAccent = new Panel
+        {
+            Dock = DockStyle.Left,
+            Width = 5,
+            BackColor = Color.FromArgb(80, 160, 255)
+        };
+
+        _statusOverlayLabel = new Label
+        {
+            Dock = DockStyle.Fill,
+            ForeColor = Color.White,
+            BackColor = Color.Transparent,
+            Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+            Padding = new Padding(14, 0, 12, 0),
+            TextAlign = ContentAlignment.MiddleLeft,
+            AutoEllipsis = true
+        };
+
+        _statusOverlay.Controls.Add(_statusOverlayLabel);
+        _statusOverlay.Controls.Add(_statusOverlayAccent);
+        statusPanel.Controls.Add(_statusOverlay);
+        _statusOverlay.BringToFront();
+        PositionStatusOverlay();
+
+        _statusOverlayTimer = new System.Windows.Forms.Timer(components)
+        {
+            Interval = 55
+        };
+        _statusOverlayTimer.Tick += (_, _) => AdvanceStatusOverlay();
+    }
+
     private void SetState(MacroState state, string displayText)
     {
+        var previousState = _currentState;
         _currentState = state;
         statusLabel.Text = displayText;
         statusLabel.ForeColor = state switch
@@ -1269,6 +1479,95 @@ public partial class MainForm : Form
             MacroState.Paused => Color.FromArgb(255, 200, 50),
             _ => Color.FromArgb(200, 200, 200)
         };
+
+        if (!string.Equals(displayText, "Idle", StringComparison.OrdinalIgnoreCase) ||
+            previousState != MacroState.Idle)
+        {
+            ShowStatusOverlay(displayText, state);
+        }
+    }
+
+    private void ShowStatusOverlay(string text, MacroState state)
+    {
+        if (string.IsNullOrWhiteSpace(text) || _statusOverlay.IsDisposed)
+            return;
+
+        _statusOverlayFrame = 0;
+        _statusOverlayLabel.Text = text;
+        _statusOverlayLabel.ForeColor = Color.White;
+        _statusOverlayBaseColor = Color.FromArgb(18, 18, 18);
+        _statusOverlay.BackColor = GetOverlayFlashColor(state);
+        _statusOverlayAccent.BackColor = GetOverlayAccentColor(state);
+        PositionStatusOverlay();
+        _statusOverlay.Visible = true;
+        _statusOverlay.BringToFront();
+        _statusOverlayTimer.Stop();
+        _statusOverlayTimer.Start();
+    }
+
+    private void AdvanceStatusOverlay()
+    {
+        _statusOverlayFrame++;
+
+        if (_statusOverlayFrame <= 4)
+        {
+            _statusOverlay.BackColor = _statusOverlayFrame % 2 == 0
+                ? _statusOverlayBaseColor
+                : GetOverlayFlashColor(_currentState);
+            return;
+        }
+
+        if (_statusOverlayFrame >= 30)
+        {
+            _statusOverlay.Visible = false;
+            _statusOverlayTimer.Stop();
+            return;
+        }
+
+        double fade = Math.Clamp((_statusOverlayFrame - 4) / 26d, 0d, 1d);
+        _statusOverlay.BackColor = BlendColor(_statusOverlayBaseColor, Color.FromArgb(8, 8, 8), fade);
+        _statusOverlayLabel.ForeColor = BlendColor(Color.White, Color.FromArgb(95, 95, 95), fade);
+    }
+
+    private void PositionStatusOverlay()
+    {
+        if (_statusOverlay == null || _statusOverlay.IsDisposed)
+            return;
+
+        _statusOverlay.Bounds = statusPanel.ClientRectangle;
+    }
+
+    private static Color GetOverlayAccentColor(MacroState state)
+    {
+        return state switch
+        {
+            MacroState.Idle => Color.FromArgb(100, 220, 120),
+            MacroState.Recording => Color.FromArgb(255, 80, 80),
+            MacroState.Playing => Color.FromArgb(80, 170, 255),
+            MacroState.Paused => Color.FromArgb(255, 210, 70),
+            _ => Color.FromArgb(180, 180, 180)
+        };
+    }
+
+    private static Color GetOverlayFlashColor(MacroState state)
+    {
+        return state switch
+        {
+            MacroState.Idle => Color.FromArgb(28, 62, 36),
+            MacroState.Recording => Color.FromArgb(70, 24, 24),
+            MacroState.Playing => Color.FromArgb(22, 42, 70),
+            MacroState.Paused => Color.FromArgb(72, 56, 18),
+            _ => Color.FromArgb(36, 36, 36)
+        };
+    }
+
+    private static Color BlendColor(Color from, Color to, double amount)
+    {
+        amount = Math.Clamp(amount, 0d, 1d);
+        int r = (int)Math.Round(from.R + (to.R - from.R) * amount);
+        int g = (int)Math.Round(from.G + (to.G - from.G) * amount);
+        int b = (int)Math.Round(from.B + (to.B - from.B) * amount);
+        return Color.FromArgb(r, g, b);
     }
 
     private void SetControllerViewerWaiting()
@@ -1306,7 +1605,12 @@ public partial class MainForm : Form
     private void StopSlotPlaybackTracking()
     {
         _slotPlaybackActive = false;
-        NativeEngine.TryResetControllerOutput();
+        ResetControllerOutputAfterPlayback();
+    }
+
+    private void ResetControllerOutputAfterPlayback()
+    {
+        NativeEngine.TryResetControllerOutput(disconnectVirtualXbox: !ShouldKeepVirtualXboxConnected);
     }
 
     private void DisposePlaybackMonitor()

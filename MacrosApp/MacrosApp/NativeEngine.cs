@@ -244,10 +244,15 @@ public static class NativeEngine
 
     public static void TryShutdown()
     {
-        if (!IsAvailable) return;
+        if (!IsAvailable)
+        {
+            VirtualXboxOutput.Disconnect();
+            return;
+        }
+
         try
         {
-            TryResetControllerOutput();
+            TryResetControllerOutput(disconnectVirtualXbox: true);
             Engine_Shutdown();
         }
         catch
@@ -478,11 +483,23 @@ public static class NativeEngine
             error = ex.Message;
         }
 
-        TryResetControllerOutput();
+        TryResetControllerOutput(disconnectVirtualXbox: true);
         return false;
     }
 
-    public static void TryResetControllerOutput()
+    public static bool TryEnsureVirtualXboxConnected(out string error)
+    {
+        return VirtualXboxOutput.TryEnsureConnected(out error);
+    }
+
+    public static bool IsVirtualXboxConnected => VirtualXboxOutput.IsConnected;
+
+    public static void TryDisconnectVirtualXbox()
+    {
+        VirtualXboxOutput.Disconnect();
+    }
+
+    public static void TryResetControllerOutput(bool disconnectVirtualXbox = true)
     {
         if (IsAvailable)
         {
@@ -496,7 +513,10 @@ public static class NativeEngine
             }
         }
 
-        VirtualXboxOutput.Disconnect();
+        if (disconnectVirtualXbox)
+            VirtualXboxOutput.Disconnect();
+        else
+            _ = VirtualXboxOutput.TryResetReport(out _);
     }
 
     public static bool TrySetVJoyDeviceId(uint deviceId)

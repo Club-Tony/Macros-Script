@@ -12,11 +12,44 @@ internal static class VirtualXboxOutput
     private static IXbox360Controller? _controller;
     private static bool _connected;
 
+    public static bool IsConnected
+    {
+        get
+        {
+            lock (Sync)
+            {
+                return _connected && _controller != null;
+            }
+        }
+    }
+
     public static bool TryEnsureConnected(out string error)
     {
         lock (Sync)
         {
             return TryEnsureConnectedLocked(out error);
+        }
+    }
+
+    public static bool TryResetReport(out string error)
+    {
+        lock (Sync)
+        {
+            if (!TryEnsureConnectedLocked(out error))
+                return false;
+
+            try
+            {
+                ResetReportLocked();
+                error = string.Empty;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                DisconnectLocked();
+                return false;
+            }
         }
     }
 

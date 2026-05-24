@@ -22,4 +22,5 @@ public class MacroSettings
     public int TriggerDeadzone { get; set; } = 30;
     public int VJoyDeviceId { get; set; } = 1;
     public ControllerOutputType ControllerOutput { get; set; } = ControllerOutputType.VJoy;
+    public bool KeepVirtualXboxConnected { get; set; }
 }
