@@ -28,6 +28,9 @@ All tests are manual (AHK v1 has no automated test framework). Run after each fe
 ## Feature Checklists
 
 ### Native MacrosApp Controller + vJoy Parity
+- [ ] Run `$env:MACROS_DISABLE_VJOY='1'; dotnet run --project MacrosApp/tools/MacrosApp.Smoke/MacrosApp.Smoke.csproj` -> disabled-vJoy smoke passes and reports `vJoy unavailable` without crashing
+- [ ] With `VirtualXbox` selected, enable `Keep Xbox live` -> playback returns to Idle while the ViGEm virtual Xbox device stays connected for game binding
+- [ ] Click `Test D-pad pulse` -> MacrosApp sends a controller-only D-pad Down pulse through the selected backend and flashes an in-window status update
 - [ ] Run `MacrosEngine/build-x64/test_engine.exe` → all native tests pass
 - [ ] Run `dotnet run --project MacrosApp/tools/MacrosApp.Smoke/MacrosApp.Smoke.csproj` → smoke test passes
 - [ ] Run `$env:MACROS_SMOKE_VIRTUAL_XBOX='1'; dotnet run --project MacrosApp/tools/MacrosApp.Smoke/MacrosApp.Smoke.csproj` → optional ViGEm/VirtualXbox smoke passes on machines with ViGEm Bus installed

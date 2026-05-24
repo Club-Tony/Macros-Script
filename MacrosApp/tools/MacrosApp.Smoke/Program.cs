@@ -306,9 +306,51 @@ static SmokeResult RunSmoke(MainForm form, string workspaceRoot)
             Success: false);
     }
 
+    var controllerPulseMethod = typeof(MainForm).GetMethod(
+        "RunControllerPulseAsync",
+        BindingFlags.Instance | BindingFlags.NonPublic);
+    if (controllerPulseMethod == null)
+    {
+        return SmokeResult.Fail(slotName, "RunControllerPulseAsync was not found.", workspaceRoot);
+    }
+
+    if (controllerPulseMethod.Invoke(form, null) is not Task controllerPulseTask)
+    {
+        return SmokeResult.Fail(slotName, "RunControllerPulseAsync did not return a Task.", workspaceRoot);
+    }
+
+    stopwatch.Restart();
+    while (!controllerPulseTask.IsCompleted && stopwatch.Elapsed < TimeSpan.FromSeconds(5))
+    {
+        Application.DoEvents();
+        Thread.Sleep(50);
+    }
+
+    if (!controllerPulseTask.IsCompleted)
+    {
+        NativeEngine.TryStopPlayback();
+        return SmokeResult.Fail(slotName, "Controller test pulse did not complete.", workspaceRoot);
+    }
+
+    if (controllerPulseTask.IsFaulted)
+    {
+        return SmokeResult.Fail(slotName,
+            "Controller test pulse faulted: " +
+            controllerPulseTask.Exception?.GetBaseException().Message,
+            workspaceRoot);
+    }
+
+    if (NativeEngine.TryIsPlaying())
+    {
+        return SmokeResult.Fail(slotName, "Controller test pulse left playback running.", workspaceRoot);
+    }
+
+    Console.WriteLine("controller_pulse_status=" + statusLabel.Text);
+
     if (Environment.GetEnvironmentVariable("MACROS_SMOKE_VIRTUAL_XBOX") == "1")
     {
         settings.ControllerOutput = ControllerOutputType.VirtualXbox;
+        settings.KeepVirtualXboxConnected = true;
         playSlotMethod.Invoke(form, new object[] { new MacroSlot { Name = slotName } });
 
         string virtualXboxStartStatus = statusLabel.Text;
@@ -341,6 +383,7 @@ static SmokeResult RunSmoke(MainForm form, string workspaceRoot)
         Console.WriteLine("virtual_xbox_final_state=" + virtualXboxFinalState);
         Console.WriteLine("virtual_xbox_slot_playback_active=" + virtualXboxSlotPlaybackActive);
         Console.WriteLine("virtual_xbox_engine_playing=" + virtualXboxEnginePlaying);
+        Console.WriteLine("virtual_xbox_connected_after_playback=" + NativeEngine.IsVirtualXboxConnected);
 
         if (virtualXboxFinalStatus != "Idle" ||
             virtualXboxFinalState != "Idle" ||
@@ -352,8 +395,23 @@ static SmokeResult RunSmoke(MainForm form, string workspaceRoot)
                 workspaceRoot);
         }
 
+        if (!NativeEngine.IsVirtualXboxConnected)
+        {
+            return SmokeResult.Fail(slotName,
+                "VirtualXbox did not remain connected with KeepVirtualXboxConnected enabled.",
+                workspaceRoot);
+        }
+
+        settings.KeepVirtualXboxConnected = false;
         settings.ControllerOutput = ControllerOutputType.VJoy;
         NativeEngine.TryResetControllerOutput();
+
+        if (NativeEngine.IsVirtualXboxConnected)
+        {
+            return SmokeResult.Fail(slotName,
+                "VirtualXbox remained connected after reset/disconnect.",
+                workspaceRoot);
+        }
     }
 
     return new SmokeResult(

@@ -1,6 +1,6 @@
 # Native Engine — Stretch Items from Completed Plan
 
-**Status:** In Progress (code complete 2026-04-28; all automatable verification green through 2026-05-20 incl. VirtualXbox smoke; only physical in-game parity gate pending)
+**Status:** In Progress (code complete 2026-04-28; automatable verification green through 2026-05-23 incl. VirtualXbox persistence/pulse and disabled-vJoy smoke; only physical in-game parity gate pending; AHK v2 controller/vJoy live parity not confirmed)
 **Created:** 2026-04-24
 **Goal:** Implement the three deferred items the `native-controller-dll.md` plan called out as out-of-scope when it was marked complete on 2026-04-23.
 
@@ -81,12 +81,27 @@ WinForms observation pass:
   - `MacrosApp.Smoke`: PASS with default vJoy path.
   - `MACROS_SMOKE_VIRTUAL_XBOX=1 MacrosApp.Smoke`: PASS; start status `Playing: smoke-slot (VirtualXbox)`, final status/state `Idle`, no engine playback left running.
 
+## WinForms Controller Test/Persistence Update - 2026-05-23
+
+- Added a runtime `Keep Xbox live` setting in MacrosApp. When `Controller out:` is `VirtualXbox`, playback now returns to Idle while the ViGEm virtual Xbox device can stay connected for games that only bind controllers present before macro playback starts.
+- Added `Test D-pad pulse`, a controller-only smoke action routed through the same native playback scheduler. It sends a short `C|2...` D-pad Down pulse through the selected backend without synthesizing mouse or keyboard input.
+- Replaced transient playback/test feedback with an in-window status-strip overlay that flashes and fades, avoiding the old tray-corner notification style for these MacrosApp state updates.
+- `MacrosApp.Smoke` now exercises the controller pulse path, disabled-vJoy UI-safe path, and VirtualXbox persistence path (`virtual_xbox_connected_after_playback=True` with keep-live enabled).
+- Live Windows MCP launch pass: direct `MacrosApp.exe` launch from `bin/Debug/net8.0-windows` opened with repo-root slots visible, the expanded settings panel fit without clipping, controller viewer reported connected, and `Test D-pad pulse` reported `Controller pulse sent (vJoy)`.
+- Verified commands on 2026-05-23:
+  - `MacrosEngine/build-x64/test_engine.exe`: PASS, 105/105.
+  - `MacrosEngine/build-x64/test_xinput_diff.exe`: PASS, 37/37.
+  - `dotnet build MacrosApp/MacrosApp/MacrosApp.csproj --no-restore`: PASS, 0 warnings/errors.
+  - `dotnet run --project MacrosApp/tools/MacrosApp.Smoke/MacrosApp.Smoke.csproj --no-restore`: PASS, including `controller_pulse_status=Controller pulse sent (vJoy)`.
+  - `$env:MACROS_DISABLE_VJOY='1'; dotnet run --project MacrosApp/tools/MacrosApp.Smoke/MacrosApp.Smoke.csproj --no-restore`: PASS, including `controller_pulse_status=Controller pulse sent (vJoy unavailable)`.
+  - `$env:MACROS_SMOKE_VIRTUAL_XBOX='1'; dotnet run --project MacrosApp/tools/MacrosApp.Smoke/MacrosApp.Smoke.csproj --no-restore`: PASS, including `virtual_xbox_connected_after_playback=True`.
+- Explicit exclusion for this pass: AHK v2 controller/vJoy live parity was not retested or confirmed.
+
 ## Remaining Acceptance Gate
 
-- Record a real mixed keyboard + mouse + controller macro in MacrosApp and confirm the saved event file contains `C|` controller rows.
-- Restart MacrosApp and replay that mixed slot through both vJoy and VirtualXbox; confirm vJoy output in `joy.cpl` and confirm VirtualXbox output in an XInput-only game such as Minecraft for Windows.
-- Load an AHK v1-recorded controller slot in MacrosApp and confirm controller playback maps through vJoy with no skipped-controller log messages.
-- Temporarily run without vJoy available and confirm MacrosApp warns clearly while staying stable.
+- Confirm MacrosApp VirtualXbox output in an XInput-only game such as Minecraft for Windows with a real mixed keyboard + mouse + controller macro.
+- Confirm any final AHK-v1-recorded controller slot that matters for day-to-day use still maps through vJoy from MacrosApp with no skipped-controller log messages.
+- AHK v2 controller/vJoy live parity remains open by request and should be handled as a separate test pass.
 - After those manual checks pass, move this plan to `Plans/Completed/`.
 
 ## Solution / Scope
