@@ -1,6 +1,6 @@
 # Native Engine — Stretch Items from Completed Plan
 
-**Status:** In Progress (code complete 2026-04-28; automatable verification green through 2026-05-23 incl. VirtualXbox persistence/pulse and disabled-vJoy smoke; only physical in-game parity gate pending; AHK v2 controller/vJoy live parity not confirmed)
+**Status:** Completed - archived 2026-05-24 (native MacrosApp path tentatively accepted; automatable verification green through 2026-05-23 incl. VirtualXbox persistence/pulse and disabled-vJoy smoke; remaining game-specific behavior treated as normal per-game compatibility rather than a blocking plan gate)
 **Created:** 2026-04-24
 **Goal:** Implement the three deferred items the `native-controller-dll.md` plan called out as out-of-scope when it was marked complete on 2026-04-23.
 
@@ -99,10 +99,16 @@ WinForms observation pass:
 
 ## Remaining Acceptance Gate
 
-- Confirm MacrosApp VirtualXbox output in an XInput-only game such as Minecraft for Windows with a real mixed keyboard + mouse + controller macro.
-- Confirm any final AHK-v1-recorded controller slot that matters for day-to-day use still maps through vJoy from MacrosApp with no skipped-controller log messages.
-- AHK v2 controller/vJoy live parity remains open by request and should be handled as a separate test pass.
-- After those manual checks pass, move this plan to `Plans/Completed/`.
+No blocking acceptance gate remains for this native MacrosApp plan under the 2026-05-24 assumption that controller recording/playback works properly and that remaining behavior in individual games depends on each game's willingness to accept SendInput/SendPlay/SendEvent, vJoy, or VirtualXbox input.
+
+Residual non-blocking follow-ups:
+
+- If a specific game rejects one backend, choose the compatible backend for that game rather than reopening this plan by default.
+- AHK v2 controller/vJoy live parity remains separate and was not completed by this native MacrosApp archive.
+
+## Completion Note - 2026-05-24
+
+Archived as tentatively complete by user direction. The native MacrosApp path now has controller event recording, vJoy playback, VirtualXbox playback, persistent VirtualXbox binding, controller-only D-pad pulse testing, disabled-vJoy graceful handling, and WinForms smoke/live launch coverage. Future work should be handled as targeted per-game compatibility or AHK v2 follow-up, not as a blocker on this completed native-engine stretch plan.
 
 ## Solution / Scope
 

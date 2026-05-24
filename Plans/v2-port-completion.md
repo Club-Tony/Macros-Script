@@ -1,6 +1,6 @@
 # AHK v2 Port Completion
 
-**Status:** In Progress (implementation complete; slot-metadata parity fix + parse smoke green 2026-05-20; live controller/vJoy verification pending)
+**Status:** On Hold - Deferred (native MacrosApp path tentatively completed/archive-ready 2026-05-24; AHK v2 controller/vJoy live verification intentionally not confirmed)
 **Created:** 2026-04-24
 **Goal:** Bring `Macros_v2.ahk` + `Lib_v2/` to feature parity with `Macros.ahk` + `Lib/`.
 
@@ -11,6 +11,8 @@ The v2 port currently sits at ~23% of v1's line count (1,428 vs 6,258 LOC). The 
 Resolution as of 2026-04-28: `MacrosApp` (C# + native engine) is the active replacement path. Keep this AHK v2 parity plan on hold unless native parity fails or a specific AHK v2 need appears.
 
 Reactivated 2026-04-28 by explicit user request to proceed with the AHK v2 plan while leaving the native live parity gate open.
+
+2026-05-24 status: the native MacrosApp path was accepted as tentatively complete and archived separately. This AHK v2 plan is not complete because controller/vJoy live parity was explicitly excluded from the latest testing pass; keep it deferred unless an AHK v2-specific need comes back.
 
 ## Implementation Update - 2026-04-28
 
