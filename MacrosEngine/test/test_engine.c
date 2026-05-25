@@ -405,8 +405,14 @@ static void test_ahk_v1_format(void)
         loaded[i].timestamp_us /= 50;
 
     CHECK(Engine_StartPlayback(loaded, n, 1), "Playback of fixture starts");
-    Sleep(300);
-    CHECK(!Engine_IsPlaying(), "Fixture playback completes cleanly");
+    /* Poll for completion -- compressed playback is ~5ms but Task Scheduler
+     * load can spike per-tick latency. Allow up to ~1s before giving up. */
+    int finished = 0;
+    for (int i = 0; i < 20; i++) {
+        Sleep(50);
+        if (!Engine_IsPlaying()) { finished = 1; break; }
+    }
+    CHECK(finished, "Fixture playback completes cleanly");
 }
 
 static void test_vjoy_disabled(void)
