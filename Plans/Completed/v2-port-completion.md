@@ -1,6 +1,6 @@
 # AHK v2 Port Completion
 
-**Status:** On Hold - Deferred (native MacrosApp path tentatively completed/archive-ready 2026-05-24; AHK v2 controller/vJoy live verification intentionally not confirmed)
+**Status:** Archived 2026-05-28 — superseded by the native `MacrosApp` (C# + native engine) path, which is the accepted replacement for v1/v2 AHK. This AHK v2 parity port is closed out as a deferred/abandoned line of work. **Open gate preserved for the record:** AHK v2 controller/vJoy live parity was never verified (intentionally excluded from the 2026-05-24 testing pass). If an AHK v2-specific need ever returns, reopen from this point — the v2 port remains a keyboard/mouse-only MVP (~23% of v1 LOC) and controller input + vJoy output + GUI panel were never ported.
 **Created:** 2026-04-24
 **Goal:** Bring `Macros_v2.ahk` + `Lib_v2/` to feature parity with `Macros.ahk` + `Lib/`.
 
