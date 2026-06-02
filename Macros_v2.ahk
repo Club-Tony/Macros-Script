@@ -1,5 +1,7 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Force
+#Include "Lib_v2\ScriptSingleton.ahk"
+EnsureScriptSingleton()
 #UseHook
 #InputLevel 1
 
