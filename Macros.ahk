@@ -1,6 +1,8 @@
 #Requires AutoHotkey v1
 #NoEnv ; Prevents Unnecessary Environment Variable lookup
 #SingleInstance, Force ; Removes script already open warning when reloading scripts
+#Include %A_ScriptDir%\Lib\ScriptSingleton.ahk
+EnsureScriptSingleton()
 #InstallKeybdHook
 #UseHook
 #InputLevel 1  ; Only respond to physical keypresses, improves game compatibility
