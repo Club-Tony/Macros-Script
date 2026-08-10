@@ -1,11 +1,16 @@
 using System.Diagnostics;
+using System.IO.Pipes;
 using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Windows.Forms;
 using MacrosApp;
 using MacrosApp.Models;
 
 SmokeResult? result = null;
 Exception? failure = null;
+string sourceRoot = Directory.GetCurrentDirectory();
 string workspaceRoot = Path.Combine(
     Path.GetTempPath(),
     "MacrosAppSmoke-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")[..8]);
@@ -13,6 +18,18 @@ string workspaceRoot = Path.Combine(
 Directory.CreateDirectory(workspaceRoot);
 Directory.CreateDirectory(Path.Combine(workspaceRoot, "macros_events"));
 File.WriteAllText(Path.Combine(workspaceRoot, "macros.ini"), string.Empty);
+
+try
+{
+    RunSettingsAndBindingSmoke(workspaceRoot);
+}
+catch (Exception ex)
+{
+    Console.Error.WriteLine("Settings/binding smoke failed.");
+    Console.Error.WriteLine(ex);
+    Console.Error.WriteLine("Workspace preserved at: " + workspaceRoot);
+    Environment.Exit(1);
+}
 
 var uiThread = new Thread(() =>
 {
@@ -87,6 +104,18 @@ if (!result.Success)
     Environment.Exit(1);
 }
 
+try
+{
+    RunTrayLifecycleSmoke(sourceRoot, workspaceRoot);
+}
+catch (Exception ex)
+{
+    Console.Error.WriteLine("Tray lifecycle smoke failed.");
+    Console.Error.WriteLine(ex);
+    Console.Error.WriteLine("Workspace preserved at: " + workspaceRoot);
+    Environment.Exit(1);
+}
+
 Directory.SetCurrentDirectory(AppContext.BaseDirectory);
 try
 {
@@ -104,9 +133,82 @@ catch (UnauthorizedAccessException)
 }
 Console.WriteLine("Smoke test passed.");
 
+static void RunTrayLifecycleSmoke(string sourceRoot, string workspaceRoot)
+{
+    string settingsPath = Path.Combine(workspaceRoot, "lifecycle-settings.json");
+    var settings = new AppSettings { OnboardingComplete = true, StartHidden = true };
+    new AppSettingsStore(settingsPath).Save(settings);
+
+    string appPath = Path.Combine(sourceRoot, "MacrosApp", "MacrosApp", "bin", "Debug", "net8.0-windows", "MacrosApp.exe");
+    if (!File.Exists(appPath))
+        throw new FileNotFoundException("Build MacrosApp before running the smoke harness.", appPath);
+
+    string suffix = "smoke" + Guid.NewGuid().ToString("N")[..8];
+    var startInfo = new ProcessStartInfo(appPath)
+    {
+        UseShellExecute = false,
+        WorkingDirectory = sourceRoot
+    };
+    startInfo.Environment["MACROSAPP_SETTINGS_PATH"] = settingsPath;
+    startInfo.Environment["MACROSAPP_INSTANCE_SUFFIX"] = suffix;
+
+    using Process process = Process.Start(startInfo) ?? throw new InvalidOperationException("Could not start MacrosApp.");
+    string pipeName = "MacrosApp.Control." + Environment.UserName + "." + suffix;
+    try
+    {
+        using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.None);
+        pipe.Connect(8000);
+        using var reader = new StreamReader(pipe, leaveOpen: true);
+        using var writer = new StreamWriter(pipe, leaveOpen: true) { AutoFlush = true };
+        writer.WriteLine("status");
+        if (reader.ReadLine() != "running")
+            throw new InvalidOperationException("Control channel status did not report running.");
+
+        process.Refresh();
+        if (process.MainWindowHandle != IntPtr.Zero && NativeSmokeMethods.IsWindowVisible(process.MainWindowHandle))
+            throw new InvalidOperationException("Tray-first startup showed the main window.");
+    }
+    finally
+    {
+        using var shutdownPipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.None);
+        shutdownPipe.Connect(3000);
+        using var shutdownReader = new StreamReader(shutdownPipe, leaveOpen: true);
+        using var shutdownWriter = new StreamWriter(shutdownPipe, leaveOpen: true) { AutoFlush = true };
+        shutdownWriter.WriteLine("shutdown");
+        _ = shutdownReader.ReadLine();
+        if (!process.WaitForExit(8000))
+            throw new InvalidOperationException("Graceful shutdown did not exit within eight seconds.");
+    }
+
+    if (process.ExitCode != 0)
+        throw new InvalidOperationException("MacrosApp exited with code " + process.ExitCode + ".");
+    Console.WriteLine("tray_lifecycle_smoke=passed");
+}
+
 static SmokeResult RunSmoke(MainForm form, string workspaceRoot)
 {
     const string slotName = "smoke-slot";
+
+    using (var palette = new PaletteForm(new AppSettings()))
+    using (var sentinel = new Form { Text = "Macros focus sentinel", ShowInTaskbar = false, Size = new Size(220, 100) })
+    {
+        if (!palette.UsesNoActivateStyle)
+            return SmokeResult.Fail(slotName, "Palette is missing WS_EX_NOACTIVATE.", workspaceRoot);
+
+        sentinel.Show();
+        sentinel.Activate();
+        Application.DoEvents();
+        IntPtr sentinelHandle = sentinel.Handle;
+        IntPtr before = NativeSmokeMethods.GetForegroundWindow();
+        palette.ShowPalette();
+        Application.DoEvents();
+        IntPtr after = NativeSmokeMethods.GetForegroundWindow();
+        palette.HidePalette();
+        sentinel.Close();
+        if (before == sentinelHandle && after != before)
+            return SmokeResult.Fail(slotName, "Showing the palette changed the foreground window.", workspaceRoot);
+        Console.WriteLine("palette_no_activate=passed");
+    }
 
     if (!NativeEngine.IsAvailable || !NativeEngine.TryInit())
     {
@@ -428,6 +530,74 @@ static SmokeResult RunSmoke(MainForm form, string workspaceRoot)
         Success: success);
 }
 
+static void RunSettingsAndBindingSmoke(string workspaceRoot)
+{
+    string settingsPath = Path.Combine(workspaceRoot, "settings.json");
+    var store = new AppSettingsStore(settingsPath);
+    var settings = new AppSettings();
+
+    Require(settings.SchemaVersion == AppSettings.CurrentSchemaVersion, "settings schema default");
+    Require(!settings.OnboardingComplete, "first run starts incomplete");
+    Require(settings.Bindings[MacroAction.Palette].KeyboardText == "Ctrl + Shift + Alt + Z", "safe launch default");
+    Require(settings.Bindings[MacroAction.Palette].Controller.Count == 0, "controller launch default unset");
+
+    settings.OnboardingComplete = true; // Covers Continue/Later persistence outcome.
+    settings.Bindings[MacroAction.Palette].Controller = new List<ControllerControl>
+    {
+        ControllerControl.LeftShoulder,
+        ControllerControl.RightShoulder
+    };
+    store.Save(settings);
+    Require(File.Exists(settingsPath) && !File.Exists(settingsPath + ".tmp"), "atomic settings save");
+
+    AppSettings loaded = store.Load();
+    Require(loaded.OnboardingComplete, "onboarding outcome round-trips");
+    Require(loaded.Bindings[MacroAction.Palette].Controller.Count == 2, "controller chord round-trips");
+    Require(loaded.HasKeyboardDuplicate(MacroAction.Autoclicker, new[] { Keys.F1 }), "duplicate keyboard chord detected");
+    Require(loaded.HasControllerDuplicate(MacroAction.Autoclicker, loaded.Bindings[MacroAction.Palette].Controller), "duplicate controller chord detected");
+
+    loaded.SchemaVersion = 0;
+    loaded.Bindings.Remove(MacroAction.Cancel);
+    var migrationJson = new JsonSerializerOptions { Converters = { new JsonStringEnumConverter() } };
+    File.WriteAllText(settingsPath, JsonSerializer.Serialize(loaded, migrationJson));
+    loaded = store.Load();
+    Require(loaded.SchemaVersion == AppSettings.CurrentSchemaVersion, "older settings schema migrates");
+    Require(loaded.Bindings[MacroAction.Cancel].Keyboard.SequenceEqual(new[] { Keys.Escape }), "missing action migrates to default");
+
+    loaded.Bindings[MacroAction.SlashMacro].Keyboard = new List<Keys> { Keys.A, Keys.B };
+    var matcher = new BindingMatcher(loaded);
+    Require(matcher.EvaluateKeyboard(new[] { Keys.A }).Count == 0, "partial keyboard chord does not trigger");
+    Require(matcher.EvaluateKeyboard(new[] { Keys.A, Keys.B }).SequenceEqual(new[] { MacroAction.SlashMacro }), "multi-key chord triggers once");
+    Require(matcher.EvaluateKeyboard(new[] { Keys.A, Keys.B }).Count == 0, "held keyboard chord is latched");
+    Require(matcher.EvaluateKeyboard(Array.Empty<Keys>()).Count == 0, "release resets keyboard latch");
+    Require(matcher.EvaluateKeyboard(new[] { Keys.A, Keys.B }).SequenceEqual(new[] { MacroAction.SlashMacro }), "keyboard chord retriggers after release");
+
+    loaded.Bindings[MacroAction.Recorder].Controller = new List<ControllerControl> { ControllerControl.LeftTrigger, ControllerControl.A };
+    matcher.UpdateSettings(loaded);
+    Require(matcher.EvaluateController(new[] { ControllerControl.LeftTrigger }).Count == 0, "partial controller chord does not trigger");
+    Require(matcher.EvaluateController(new[] { ControllerControl.LeftTrigger, ControllerControl.A }).SequenceEqual(new[] { MacroAction.Recorder }), "controller chord triggers once");
+    Require(matcher.EvaluateController(Array.Empty<ControllerControl>()).Count == 0, "controller disconnect/release resets latch");
+
+    var belowThreshold = new ControllerState { Connected = true, LeftTrigger = ControllerControls.TriggerThreshold - 1 };
+    var atThreshold = new ControllerState { Connected = true, LeftTrigger = ControllerControls.TriggerThreshold };
+    Require(!ControllerControls.FromState(belowThreshold).Contains(ControllerControl.LeftTrigger), "trigger below threshold ignored");
+    Require(ControllerControls.FromState(atThreshold).Contains(ControllerControl.LeftTrigger), "trigger threshold accepted");
+
+    loaded.Reset(MacroAction.SlashMacro);
+    Require(loaded.Bindings[MacroAction.SlashMacro].Keyboard.SequenceEqual(new[] { Keys.F1 }), "per-action reset");
+    loaded.Bindings[MacroAction.Cancel].Keyboard.Clear();
+    loaded.ResetAll();
+    Require(loaded.Bindings[MacroAction.Cancel].Keyboard.SequenceEqual(new[] { Keys.Escape }), "reset all");
+
+    Console.WriteLine("settings_binding_smoke=passed");
+
+    static void Require(bool condition, string message)
+    {
+        if (!condition)
+            throw new InvalidOperationException("Assertion failed: " + message);
+    }
+}
+
 internal sealed record SmokeResult(
     string SlotName,
     uint SavedCount,
@@ -456,4 +626,14 @@ internal sealed record SmokeResult(
             FailureReason: reason,
             Success: false);
     }
+}
+
+internal static class NativeSmokeMethods
+{
+    [DllImport("user32.dll")]
+    internal static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool IsWindowVisible(IntPtr hWnd);
 }

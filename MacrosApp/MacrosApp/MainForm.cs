@@ -40,6 +40,8 @@ public partial class MainForm : Form
     private string _configuredHoldKeyLabel = string.Empty;
     private bool _holdMacroEngaged;
     private bool _controllerPulseActive;
+    private bool _runtimeStarted;
+    private bool _runtimeShutdown;
     private int _turboRepeatMs = 40;
     private Panel _statusOverlay = null!;
     private Panel _statusOverlayAccent = null!;
@@ -55,6 +57,20 @@ public partial class MainForm : Form
 
     // Tray icon (created and owned by Program.cs, passed in)
     private NotifyIcon? _trayIcon;
+
+    public event EventHandler? ExitRequested;
+    public event EventHandler? SettingsChanged;
+    public event EventHandler<MacroStatusChangedEventArgs>? StatusChanged;
+
+    public MacroSettings RuntimeSettings => _settings;
+    public string CurrentProfileName
+    {
+        get
+        {
+            string text = profileStatusLabel?.Text ?? "Profile: Default";
+            return text.StartsWith("Profile: ", StringComparison.Ordinal) ? text[9..] : text;
+        }
+    }
 
     public enum MacroState
     {
@@ -73,8 +89,9 @@ public partial class MainForm : Form
         Recorder
     }
 
-    public MainForm()
+    public MainForm(MacroSettings? settings = null)
     {
+        _settings = settings ?? new MacroSettings();
         InitializeComponent();
         InitializeStatusOverlay();
         InitializeToolTips();
@@ -82,6 +99,7 @@ public partial class MainForm : Form
         WireEvents();
         InitializePlaybackMonitor();
         LoadData();
+        ApplySettingsToControls();
         UpdateEngineStatus();
     }
 
@@ -155,12 +173,14 @@ public partial class MainForm : Form
         {
             _settings.AutoclickerInterval = (int)nudInterval.Value;
             RefreshAutoclickerInterval();
+            SettingsChanged?.Invoke(this, EventArgs.Empty);
         };
         cmbSendMode.SelectedIndexChanged += (_, _) =>
         {
             if (Enum.TryParse<SendModeType>(cmbSendMode.SelectedItem?.ToString(), out var mode))
                 _settings.SendMode = mode;
             ClearComboSelectionHighlight(cmbSendMode);
+            SettingsChanged?.Invoke(this, EventArgs.Empty);
         };
         cmbControllerOutput.SelectedIndexChanged += (_, _) =>
         {
@@ -168,14 +188,20 @@ public partial class MainForm : Form
                 _settings.ControllerOutput = output;
             ClearComboSelectionHighlight(cmbControllerOutput);
             ApplyVirtualXboxConnectionPreference(showStatus: false);
+            SettingsChanged?.Invoke(this, EventArgs.Empty);
         };
         cmbSendMode.DropDownClosed += (_, _) => ClearComboSelectionHighlight(cmbSendMode);
         cmbControllerOutput.DropDownClosed += (_, _) => ClearComboSelectionHighlight(cmbControllerOutput);
-        nudLoopCount.ValueChanged += (_, _) => _settings.LoopCount = (int)nudLoopCount.Value;
+        nudLoopCount.ValueChanged += (_, _) =>
+        {
+            _settings.LoopCount = (int)nudLoopCount.Value;
+            SettingsChanged?.Invoke(this, EventArgs.Empty);
+        };
         chkKeepVirtualXbox.CheckedChanged += (_, _) =>
         {
             _settings.KeepVirtualXboxConnected = chkKeepVirtualXbox.Checked;
             ApplyVirtualXboxConnectionPreference(showStatus: true);
+            SettingsChanged?.Invoke(this, EventArgs.Empty);
         };
         btnControllerPulse.Click += async (_, _) => await RunControllerPulseAsync();
     }
@@ -298,6 +324,15 @@ public partial class MainForm : Form
         }
     }
 
+    private void ApplySettingsToControls()
+    {
+        nudInterval.Value = Math.Clamp(_settings.AutoclickerInterval, (int)nudInterval.Minimum, (int)nudInterval.Maximum);
+        cmbSendMode.SelectedItem = _settings.SendMode.ToString();
+        cmbControllerOutput.SelectedItem = _settings.ControllerOutput.ToString();
+        nudLoopCount.Value = Math.Clamp(_settings.LoopCount, (int)nudLoopCount.Minimum, (int)nudLoopCount.Maximum);
+        chkKeepVirtualXbox.Checked = _settings.KeepVirtualXboxConnected;
+    }
+
     private void UpdateEngineStatus()
     {
         if (NativeEngine.IsAvailable)
@@ -321,7 +356,14 @@ public partial class MainForm : Form
 
     private void MainForm_Shown(object? sender, EventArgs e)
     {
-        _hotkeyManager.RegisterAll();
+        StartRuntime();
+    }
+
+    public void StartRuntime()
+    {
+        if (_runtimeStarted || _runtimeShutdown)
+            return;
+        _runtimeStarted = true;
 
         if (NativeEngine.IsAvailable && NativeEngine.TryInit())
         {
@@ -360,16 +402,7 @@ public partial class MainForm : Form
             return;
         }
 
-        // Actual shutdown
-        DeactivateHoldMode(silent: true);
-        DisposeRecordingHook();
-        DisposeAutoclickerTimer();
-        NativeEngine.TryStopPlayback();
-        DisposePlaybackMonitor();
-        _hotkeyManager.Dispose();
-        controllerState.StopRefresh();
-        NativeEngine.TryStopPolling();
-        NativeEngine.TryShutdown();
+        ShutdownRuntime();
     }
 
     private void MainForm_Resize(object? sender, EventArgs e)
@@ -409,8 +442,29 @@ public partial class MainForm : Form
     /// </summary>
     public void ExitApplication()
     {
-        _isExiting = true;
+        if (ExitRequested != null)
+        {
+            ExitRequested.Invoke(this, EventArgs.Empty);
+            return;
+        }
 
+        _isExiting = true;
+        ShutdownRuntime();
+
+        if (_trayIcon != null)
+        {
+            _trayIcon.Visible = false;
+            _trayIcon.Dispose();
+        }
+
+        Application.Exit();
+    }
+
+    public void ShutdownRuntime()
+    {
+        if (_runtimeShutdown)
+            return;
+        _runtimeShutdown = true;
         DeactivateHoldMode(silent: true);
         DisposeRecordingHook();
         DisposeAutoclickerTimer();
@@ -420,14 +474,6 @@ public partial class MainForm : Form
         controllerState.StopRefresh();
         NativeEngine.TryStopPolling();
         NativeEngine.TryShutdown();
-
-        if (_trayIcon != null)
-        {
-            _trayIcon.Visible = false;
-            _trayIcon.Dispose();
-        }
-
-        Application.Exit();
     }
 
     // ================================================================
@@ -491,6 +537,44 @@ public partial class MainForm : Form
                     RestoreFromTray();
                 break;
             case HotkeyManager.HOTKEY_CANCEL:
+                CancelCurrentOperation();
+                break;
+        }
+    }
+
+    public void ExecuteAction(MacroAction action)
+    {
+        if (_hotkeysSuspended)
+            return;
+
+        if (_activeMacroType == MacroType.Recorder)
+        {
+            if (action is MacroAction.Recorder or MacroAction.Cancel)
+                DeactivateCurrentMacro();
+            return;
+        }
+
+        switch (action)
+        {
+            case MacroAction.SlashMacro:
+                ToggleMacro(MacroType.SlashMacro);
+                break;
+            case MacroAction.Autoclicker:
+                ToggleMacro(MacroType.Autoclicker);
+                break;
+            case MacroAction.TurboHold:
+                ToggleMacro(MacroType.TurboHold);
+                break;
+            case MacroAction.PureHold:
+                ToggleMacro(MacroType.PureHold);
+                break;
+            case MacroAction.Recorder:
+                ToggleMacro(MacroType.Recorder);
+                break;
+            case MacroAction.Playback:
+                HandlePlaybackHotkey();
+                break;
+            case MacroAction.Cancel:
                 CancelCurrentOperation();
                 break;
         }
@@ -1485,6 +1569,8 @@ public partial class MainForm : Form
         {
             ShowStatusOverlay(displayText, state);
         }
+
+        StatusChanged?.Invoke(this, new MacroStatusChangedEventArgs(displayText, CurrentProfileName));
     }
 
     private void ShowStatusOverlay(string text, MacroState state)

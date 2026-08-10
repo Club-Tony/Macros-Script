@@ -1,135 +1,200 @@
-using System.Drawing;
+using MacrosApp.Models;
 
 namespace MacrosApp;
 
 static class Program
 {
     private static Mutex? _mutex;
-    private static NotifyIcon? _trayIcon;
-    private static MainForm? _mainForm;
 
     [STAThread]
     static void Main()
     {
-        // Single instance check
-        const string mutexName = "MacrosApp_SingleInstance_Mutex";
+        string mutexName = "MacrosApp_SingleInstance_Mutex" +
+            (Environment.GetEnvironmentVariable("MACROSAPP_INSTANCE_SUFFIX") is { Length: > 0 } suffix ? "_" + suffix : string.Empty);
         _mutex = new Mutex(true, mutexName, out bool isNewInstance);
-
         if (!isNewInstance)
         {
-            // Another instance is already running
-            MessageBox.Show("Macros is already running.", "Macros",
-                MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show("Macros is already running in the system tray.", "Macros", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
 
         try
         {
             ApplicationConfiguration.Initialize();
+            if (!LegacyRuntimeGuard.AllowNativeStartup())
+                return;
 
-            _mainForm = new MainForm();
-
-            // Create tray icon
-            _trayIcon = CreateTrayIcon();
-            _mainForm.SetTrayIcon(_trayIcon);
-
-            Application.Run(_mainForm);
+            using var context = new MacrosApplicationContext();
+            Application.Run(context);
         }
         finally
         {
-            if (_trayIcon != null)
-            {
-                _trayIcon.ContextMenuStrip?.Dispose();
-                _trayIcon.Dispose();
-            }
-            _mutex?.ReleaseMutex();
-            _mutex?.Dispose();
+            _mutex.ReleaseMutex();
+            _mutex.Dispose();
         }
     }
+}
 
-    private static NotifyIcon CreateTrayIcon()
+public sealed class MacrosApplicationContext : ApplicationContext
+{
+    private readonly AppSettingsStore _settingsStore;
+    private readonly AppSettings _settings;
+    private readonly MainForm _mainForm;
+    private readonly PaletteForm _palette;
+    private readonly NotifyIcon _trayIcon;
+    private readonly InputBindingRuntime _bindings;
+    private readonly ControlPipeServer _controlPipe;
+    private bool _exiting;
+
+    public MacrosApplicationContext()
     {
-        var trayMenu = new ContextMenuStrip();
-        trayMenu.Renderer = new DarkTrayMenuRenderer();
+        _settingsStore = new AppSettingsStore();
+        _settings = _settingsStore.Load();
+        _mainForm = new MainForm(_settings.Runtime);
+        _mainForm.ExitRequested += (_, _) => ExitApplication();
+        _mainForm.SettingsChanged += (_, _) => SaveSettings();
+        _mainForm.StatusChanged += MainForm_StatusChanged;
+        _palette = new PaletteForm(_settings);
+        _trayIcon = CreateTrayIcon();
+        _mainForm.SetTrayIcon(_trayIcon);
+        _mainForm.StartRuntime();
 
-        var showItem = new ToolStripMenuItem("Show", null, (_, _) =>
+        _bindings = new InputBindingRuntime(_settings);
+        _bindings.ActionTriggered += action =>
         {
-            _mainForm?.RestoreFromTray();
-        });
-        showItem.Font = new Font(showItem.Font, FontStyle.Bold);
-
-        var hideItem = new ToolStripMenuItem("Hide", null, (_, _) =>
+            if (_mainForm.IsDisposed)
+                return;
+            _mainForm.BeginInvoke((MethodInvoker)(() => DispatchAction(action)));
+        };
+        _controlPipe = new ControlPipeServer(() =>
         {
-            _mainForm?.Hide();
+            if (!_mainForm.IsDisposed)
+                _mainForm.BeginInvoke((MethodInvoker)ExitApplication);
         });
 
-        var separator = new ToolStripSeparator();
+        if (!_settings.OnboardingComplete)
+            ShowOnboarding();
 
-        var exitItem = new ToolStripMenuItem("Exit", null, (_, _) =>
+        _trayIcon.Visible = true;
+        _mainForm.Hide();
+    }
+
+    private void DispatchAction(MacroAction action)
+    {
+        if (action == MacroAction.Palette)
+            _palette.TogglePalette();
+        else
+            _mainForm.ExecuteAction(action);
+        _palette.RegisterActivity();
+    }
+
+    private void MainForm_StatusChanged(object? sender, MacroStatusChangedEventArgs e)
+    {
+        _palette.UpdateStatus(e.State, e.Profile);
+    }
+
+    private void ShowOnboarding()
+    {
+        using var onboarding = new OnboardingForm(_settings);
+        _ = onboarding.ShowDialog();
+        _settings.OnboardingComplete = true;
+        _settings.StartHidden = true;
+        SaveSettings();
+        _bindings?.UpdateSettings(_settings);
+        _palette.RefreshBindings(_settings);
+    }
+
+    private void ShowBindings()
+    {
+        using var form = new BindingSettingsForm(_settings, _settingsStore);
+        form.BindingsChanged += (_, _) =>
         {
-            _mainForm?.ExitApplication();
-        });
-        exitItem.ForeColor = Color.FromArgb(255, 100, 100);
+            _bindings.UpdateSettings(_settings);
+            _palette.RefreshBindings(_settings);
+        };
+        form.ShowDialog(_mainForm.Visible ? _mainForm : null);
+    }
 
-        trayMenu.Items.AddRange(new ToolStripItem[] { showItem, hideItem, separator, exitItem });
+    private void SaveSettings()
+    {
+        _settings.Runtime = _mainForm.RuntimeSettings;
+        _settingsStore.Save(_settings);
+    }
+
+    private NotifyIcon CreateTrayIcon()
+    {
+        var menu = new ContextMenuStrip { Renderer = new DarkTrayMenuRenderer() };
+        var show = new ToolStripMenuItem("Show Macros", null, (_, _) => _mainForm.RestoreFromTray())
+        {
+            Font = new Font(SystemFonts.MenuFont ?? Control.DefaultFont, FontStyle.Bold)
+        };
+        var palette = new ToolStripMenuItem("Show in-game palette", null, (_, _) => _palette.TogglePalette());
+        var bindings = new ToolStripMenuItem("Bindings and setup...", null, (_, _) => ShowBindings());
+        var hide = new ToolStripMenuItem("Hide", null, (_, _) => _mainForm.Hide());
+        var exit = new ToolStripMenuItem("Exit", null, (_, _) => ExitApplication())
+        {
+            ForeColor = Color.FromArgb(255, 100, 100)
+        };
+        menu.Items.AddRange(new ToolStripItem[] { show, palette, bindings, hide, new ToolStripSeparator(), exit });
 
         var icon = new NotifyIcon
         {
-            Text = "Macros",
-            ContextMenuStrip = trayMenu,
+            Text = "Macros - running in tray",
+            ContextMenuStrip = menu,
+            Icon = LoadIcon(),
             Visible = false
         };
-
-        // Try to load icon from the icons folder, fall back to default app icon
-        string iconPath = FindIconPath();
-        if (File.Exists(iconPath))
-        {
-            try
-            {
-                icon.Icon = new Icon(iconPath);
-            }
-            catch
-            {
-                icon.Icon = SystemIcons.Application;
-            }
-        }
-        else
-        {
-            icon.Icon = SystemIcons.Application;
-        }
-
-        icon.DoubleClick += (_, _) => _mainForm?.RestoreFromTray();
-
+        icon.DoubleClick += (_, _) => _mainForm.RestoreFromTray();
         return icon;
     }
 
-    private static string FindIconPath()
+    private static Icon LoadIcon()
     {
-        // Look for icon relative to the Macros-Script repo
-        string baseDir = AppDomain.CurrentDomain.BaseDirectory;
-
-        // Try navigating up to find the icons folder
-        string[] candidates = new[]
+        string baseDirectory = AppDomain.CurrentDomain.BaseDirectory;
+        string[] candidates =
         {
-            Path.Combine(baseDir, "..", "..", "..", "..", "icons", "idle.ico"),
-            Path.Combine(baseDir, "icons", "idle.ico"),
+            Path.Combine(baseDirectory, "..", "..", "..", "..", "icons", "idle.ico"),
+            Path.Combine(baseDirectory, "icons", "idle.ico"),
             Path.Combine(Directory.GetCurrentDirectory(), "icons", "idle.ico")
         };
-
-        foreach (var path in candidates)
+        foreach (string candidate in candidates)
         {
-            var full = Path.GetFullPath(path);
-            if (File.Exists(full))
-                return full;
+            string fullPath = Path.GetFullPath(candidate);
+            if (File.Exists(fullPath))
+            {
+                try { return new Icon(fullPath); } catch { }
+            }
         }
-
-        return string.Empty;
+        return SystemIcons.Application;
     }
 
-    private class DarkTrayMenuRenderer : ToolStripProfessionalRenderer
+    private void ExitApplication()
+    {
+        if (_exiting)
+            return;
+        _exiting = true;
+        SaveSettings();
+        _palette.HidePalette();
+        _mainForm.ShutdownRuntime();
+        _trayIcon.Visible = false;
+        ExitThread();
+    }
+
+    protected override void ExitThreadCore()
+    {
+        _controlPipe.Dispose();
+        _bindings.Dispose();
+        _palette.Dispose();
+        _trayIcon.ContextMenuStrip?.Dispose();
+        _trayIcon.Dispose();
+        if (!_mainForm.IsDisposed)
+            _mainForm.Dispose();
+        base.ExitThreadCore();
+    }
+
+    private sealed class DarkTrayMenuRenderer : ToolStripProfessionalRenderer
     {
         public DarkTrayMenuRenderer() : base(new DarkTrayColorTable()) { }
-
         protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
         {
             if (e.Item is ToolStripMenuItem item && item.ForeColor != Color.FromArgb(255, 100, 100))
@@ -138,7 +203,7 @@ static class Program
         }
     }
 
-    private class DarkTrayColorTable : ProfessionalColorTable
+    private sealed class DarkTrayColorTable : ProfessionalColorTable
     {
         public override Color MenuItemSelected => Color.FromArgb(50, 80, 120);
         public override Color MenuItemBorder => Color.FromArgb(70, 70, 70);

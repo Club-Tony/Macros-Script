@@ -1,6 +1,46 @@
-# TESTING.md — Manual Test Checklist
+# TESTING.md - Macros-Script validation
 
-All tests are manual (AHK v1 has no automated test framework). Run after each feature is implemented.
+`MacrosApp` plus `MacrosEngine` is the primary validation target. The frozen AHK v1 worktree is a fallback compatibility gate, and the AHK v2 checks below are archival regression checks rather than the active product roadmap.
+
+## Automated gate
+
+From `Repositories\Agent-Hub`:
+
+```powershell
+python tests\live\run_live_tests.py macros
+python tests\live\run_live_tests.py macros --fixture visual
+```
+
+The normal gate covers the native engine, .NET builds, settings migration and atomic round-trips, binding defaults/resets/collisions, keyboard and controller chord latching, trigger thresholds, disconnect/reconnect behavior, tray-first hidden startup, the current-user control channel, graceful shutdown, and palette focus preservation. The explicit visual fixture covers onboarding, binding settings, and palette idle/recording/playback/error states. Update baselines only with `--update-baselines` and inspect them before acceptance.
+
+## Supervised game matrix
+
+Run this only with a person present; never schedule it during gameplay.
+
+| Mode | No focus loss | No unexpected full GUI | Chord fires once | Status surface |
+|---|---|---|---|---|
+| Windowed | Required | Required | Required | Required |
+| Borderless | Required | Required | Required | Required |
+| Exclusive fullscreen | Required | Required | Required | Desktop palette may be invisible until the deferred Vulkan layer ships |
+
+Also verify that elevated or anti-cheat-protected games may ignore `SendInput`; this is a documented platform limitation, not a bypass target.
+
+## Frozen legacy validation
+
+- Detached worktree HEAD is exactly `05226d8e50eb619bf4ce394f732536aa0cb7e9d7`.
+- `Macros.ahk` blob is exactly `a2d6db61b6fd5d503bac37f2463e72507fb2fe16`.
+- `Launch-LegacyMacros.ps1 -ValidateOnly` resolves AutoHotkey v1.1.37.02.
+- `Install-LegacyDesktopShortcut.ps1 -ValidateOnly` reports the exact launcher target without writing Desktop.
+- A failed graceful runtime switch cancels launch and never force-kills.
+- Starting MacrosApp while a Macros AHK runtime is active offers a graceful switch; choosing No leaves AHK as the sole runtime, and a failed five-second shutdown cancels native startup.
+- `tools\legacy\fixtures\GracefulShutdownProbe.ahk` confirms the hidden-window Exit command runs AHK `OnExit` cleanup before process exit.
+- Change the active branch in the primary worktree and confirm the shortcut still resolves the detached legacy path.
+
+---
+
+# Historical manual checklist
+
+The remainder is retained for legacy/manual reference.
 
 ---
 

@@ -4,6 +4,7 @@ MacrosEngine/build-*/
 MacrosApp/**/bin/
 MacrosApp/**/obj/
 tests/live/artifacts/
+tests/visual/artifacts/
 macros.ini
 macros_events/*.txt
 macros.ini.bak
