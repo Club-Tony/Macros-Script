@@ -4,7 +4,7 @@
 
 ## Automated gate
 
-From `Repositories\Agent-Hub`:
+From the workspace tooling checkout (maintained separately, not part of this repository):
 
 ```powershell
 python tests\live\run_live_tests.py macros

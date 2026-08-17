@@ -20,7 +20,7 @@ dotnet build MacrosApp\MacrosApp\MacrosApp.csproj
 dotnet run --project MacrosApp\MacrosApp\MacrosApp.csproj
 ```
 
-Run the automated gate from the Agent-Hub repository:
+Run the automated gate from the workspace tooling checkout (maintained separately, not part of this repository):
 
 ```powershell
 python tests\live\run_live_tests.py macros
@@ -40,7 +40,7 @@ Visual baselines update only through the explicit visual fixture with `--update-
 
 The original non-GUI AHK v1 implementation is preserved in a detached worktree at commit `05226d8`:
 
-`C:\Users\Davey\Documents\.workspace\Repositories\Macros-Script-Legacy-05226d8`
+`%USERPROFILE%\Documents\.workspace\Repositories\Macros-Script-Legacy-05226d8`
 
 Its launcher verifies both the exact commit and `Macros.ahk` blob, resolves AutoHotkey v1.1.37.02 explicitly, and refuses to force-kill another Macros runtime. MacrosApp performs the same exclusion check in the opposite direction and only offers a graceful switch from AHK. Run `Install-LegacyDesktopShortcut.ps1` in that directory once to create the Desktop shortcut. The shortcut is independent of whichever branch is active in this repository.
 
