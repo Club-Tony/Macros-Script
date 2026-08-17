@@ -11,3 +11,8 @@ macros.ini.bak
 
 # AHK validation artifacts (/ErrorStdOut, /iLib, /validate error output)
 *.err
+
+# Planning docs are internal process material and are kept in a private
+# planning repository. This repo is PUBLIC -- plan and handoff files must
+# never be committed here.
+Plans/
