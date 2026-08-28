@@ -2,6 +2,8 @@
 
 This document defines the standard UI text, timing, and interaction patterns used throughout Macros-Script. Follow these when adding new features.
 
+Native `MacrosApp` is the current in-game product path. Stop-record auto-saves as `recording-yyyyMMdd-HHmmss` and toasts on the compact layered HUD. Do not add a `Save Recording` InputBox or other mouse dialog to the in-game record/play path. The tables below remain the AHK/legacy copy reference.
+
 ---
 
 ## Tooltip Behavior

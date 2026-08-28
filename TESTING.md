@@ -11,7 +11,7 @@ python tests\live\run_live_tests.py macros
 python tests\live\run_live_tests.py macros --fixture visual
 ```
 
-The normal gate covers the native engine, .NET builds, settings migration and atomic round-trips, binding defaults/resets/collisions, keyboard and controller chord latching, trigger thresholds, disconnect/reconnect behavior, tray-first hidden startup, the current-user control channel, graceful shutdown, and palette focus preservation. The explicit visual fixture covers onboarding, binding settings, and palette idle/recording/playback/error states. Update baselines only with `--update-baselines` and inspect them before acceptance.
+The normal gate covers the native engine, .NET builds, settings migration and atomic round-trips, binding defaults/resets/collisions, keyboard and controller chord latching, trigger thresholds, disconnect/reconnect behavior, tray-first hidden startup, the current-user control channel, graceful shutdown, palette focus preservation, hands-free recorder autosave, and VirtualXbox playback when that backend is present. The explicit visual fixture covers onboarding, binding settings, and the compact HUD idle/recording/playback/error states. Update baselines only with `--update-baselines` and inspect them before acceptance.
 
 ## Supervised game matrix
 
@@ -21,7 +21,9 @@ Run this only with a person present; never schedule it during gameplay.
 |---|---|---|---|---|
 | Windowed | Required | Required | Required | Required |
 | Borderless | Required | Required | Required | Required |
-| Exclusive fullscreen | Required | Required | Required | Desktop palette may be invisible until the deferred Vulkan layer ships |
+| Exclusive fullscreen | Required | Required | Required | Layered HUD may still be invisible until the deferred Vulkan layer ships |
+
+Confirm the HUD appears on the monitor of the focused game window, not only the primary display. Confirm stop-record auto-saves (`recording-...`) with a HUD toast and never opens a mouse save dialog.
 
 Also verify that elevated or anti-cheat-protected games may ignore `SendInput`; this is a documented platform limitation, not a bypass target.
 
