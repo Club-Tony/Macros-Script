@@ -189,6 +189,26 @@ static void test_combined_diff_scenarios(void)
           "dpad up vs dpad right unequal");
 }
 
+static void test_controller_record_after_release(void)
+{
+    printf("\n[controller_record_after_release]\n");
+
+    bool wait = true;
+    ControllerState held = normalize_for_recording(
+        &(ControllerState){.buttons = XINPUT_GAMEPAD_A, .connected = true});
+    CHECK(!controller_record_after_release(&wait, &held),
+          "held start chord does not record");
+    CHECK(wait, "wait remains armed while held");
+
+    ControllerState neutral = normalize_for_recording(
+        &(ControllerState){.connected = true});
+    CHECK(!controller_record_after_release(&wait, &neutral),
+          "first neutral frame arms without recording");
+    CHECK(!wait, "wait clears on release");
+    CHECK(controller_record_after_release(&wait, &held),
+          "after release, snapshots may record");
+}
+
 int main(void)
 {
     printf("=== xinput_diff Test Suite ===\n");
@@ -199,6 +219,7 @@ int main(void)
     test_states_equal();
     test_state_is_neutral();
     test_combined_diff_scenarios();
+    test_controller_record_after_release();
 
     printf("\n=== Results: %d / %d passed ===\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;

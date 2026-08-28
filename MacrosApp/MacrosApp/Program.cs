@@ -66,6 +66,7 @@ public sealed class MacrosApplicationContext : ApplicationContext
                 return;
             _mainForm.BeginInvoke((MethodInvoker)(() => DispatchAction(action)));
         };
+        _mainForm.SetRecorderChord(_settings.Bindings[MacroAction.Recorder].Controller);
         _controlPipe = new ControlPipeServer(() =>
         {
             if (!_mainForm.IsDisposed)
@@ -91,6 +92,12 @@ public sealed class MacrosApplicationContext : ApplicationContext
     private void MainForm_StatusChanged(object? sender, MacroStatusChangedEventArgs e)
     {
         _palette.UpdateStatus(e.State, e.Profile);
+        if (_palette.ShouldStayVisible)
+            _palette.ShowPalette(keepVisible: true);
+        else if (_palette.ShouldToast)
+            _palette.ShowPalette(keepVisible: false);
+        else if (_palette.IsPaletteVisible)
+            _palette.ShowPalette(keepVisible: false);
     }
 
     private void ShowOnboarding()
@@ -102,6 +109,7 @@ public sealed class MacrosApplicationContext : ApplicationContext
         SaveSettings();
         _bindings?.UpdateSettings(_settings);
         _palette.RefreshBindings(_settings);
+        _mainForm.SetRecorderChord(_settings.Bindings[MacroAction.Recorder].Controller);
     }
 
     private void ShowBindings()
@@ -111,6 +119,7 @@ public sealed class MacrosApplicationContext : ApplicationContext
         {
             _bindings.UpdateSettings(_settings);
             _palette.RefreshBindings(_settings);
+            _mainForm.SetRecorderChord(_settings.Bindings[MacroAction.Recorder].Controller);
         };
         form.ShowDialog(_mainForm.Visible ? _mainForm : null);
     }

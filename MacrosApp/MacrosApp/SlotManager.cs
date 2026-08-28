@@ -150,6 +150,22 @@ public class SlotManager
         return SanitizeSlotName(name);
     }
 
+    public string AllocateRecordingName(DateTime timestamp)
+    {
+        string baseName = "recording-" + timestamp.ToString("yyyyMMdd-HHmmss");
+        var existing = LoadSlots()
+            .Select(slot => slot.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        string name = baseName;
+        int suffix = 2;
+        while (existing.Contains(name) || File.Exists(GetEventFilePath(name)))
+        {
+            name = baseName + "-" + suffix;
+            suffix++;
+        }
+        return name;
+    }
+
     /// <summary>
     /// Save event data for a slot.
     /// </summary>

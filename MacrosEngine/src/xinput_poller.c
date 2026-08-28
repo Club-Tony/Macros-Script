@@ -82,6 +82,7 @@ static uint32_t          g_poll_interval_ms = 4;  /* ~250 Hz default */
 static ControllerState   g_states[MAX_PLAYERS];
 static ControllerState   g_record_prev_state;
 static bool              g_record_prev_valid = false;
+static bool              g_record_wait_release = false;
 
 /* Per-player deadzones */
 static int16_t           g_thumb_deadzone[MAX_PLAYERS];
@@ -166,6 +167,9 @@ static void maybe_record_controller_snapshot(void)
 
     ControllerState normalized = normalize_for_recording(&sample);
 
+    if (!controller_record_after_release(&g_record_wait_release, &normalized))
+        return;
+
     if (!g_record_prev_valid) {
         g_record_prev_state = normalized;
         g_record_prev_valid = true;
@@ -226,8 +230,12 @@ ENGINE_API bool Engine_StartPolling(uint32_t interval_ms)
 {
     if (!Engine_IsInitialized())
         return false;
+
+    /* Allow a later StartPolling call to retune the interval without bouncing
+     * the poll thread (recording wants ~4ms; preview uses 16ms). */
+    g_poll_interval_ms = (interval_ms > 0) ? interval_ms : 4;
     if (g_poll_running)
-        return true;   /* already running */
+        return true;   /* already running; interval updated */
 
     if (!load_xinput())
         return false;  /* XInput not available */
@@ -240,7 +248,6 @@ ENGINE_API bool Engine_StartPolling(uint32_t interval_ms)
             g_trigger_deadzone[i] = RECORDER_TRIGGER_DEADZONE;
     }
 
-    g_poll_interval_ms = (interval_ms > 0) ? interval_ms : 4;
     g_poll_running = true;
 
     g_poll_thread = CreateThread(NULL, 0, poll_thread_proc, NULL, 0, NULL);
@@ -304,6 +311,7 @@ ENGINE_API bool Engine_StartControllerRecording(void)
     EnterCriticalSection(&g_engine_cs);
     g_record_prev_valid = false;
     memset(&g_record_prev_state, 0, sizeof(g_record_prev_state));
+    g_record_wait_release = true;
     g_controller_recording = true;
     LeaveCriticalSection(&g_engine_cs);
     return true;
@@ -317,6 +325,7 @@ ENGINE_API void Engine_StopControllerRecording(void)
     EnterCriticalSection(&g_engine_cs);
     g_controller_recording = false;
     g_record_prev_valid = false;
+    g_record_wait_release = false;
     memset(&g_record_prev_state, 0, sizeof(g_record_prev_state));
     LeaveCriticalSection(&g_engine_cs);
 }
@@ -342,5 +351,6 @@ void poller_cleanup(void)
     memset(g_states, 0, sizeof(g_states));
     g_controller_recording = false;
     g_record_prev_valid = false;
+    g_record_wait_release = false;
     memset(&g_record_prev_state, 0, sizeof(g_record_prev_state));
 }

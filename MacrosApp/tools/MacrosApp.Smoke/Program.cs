@@ -208,6 +208,17 @@ static SmokeResult RunSmoke(MainForm form, string workspaceRoot)
         if (before == sentinelHandle && after != before)
             return SmokeResult.Fail(slotName, "Showing the palette changed the foreground window.", workspaceRoot);
         Console.WriteLine("palette_no_activate=passed");
+
+        palette.UpdateStatus("Recording...", "Default");
+        if (!palette.ShouldStayVisible)
+            return SmokeResult.Fail(slotName, "Recording status should keep the HUD visible.", workspaceRoot);
+        palette.UpdateStatus("Saved: recording-1 (2 events)", "Default");
+        if (palette.ShouldStayVisible || !palette.ShouldToast)
+            return SmokeResult.Fail(slotName, "Saved status should toast instead of staying sticky.", workspaceRoot);
+        palette.UpdateStatus("Idle", "Default");
+        if (palette.ShouldStayVisible || palette.ShouldToast)
+            return SmokeResult.Fail(slotName, "Idle status should not keep or toast the HUD.", workspaceRoot);
+        Console.WriteLine("palette_sticky_toast=passed");
     }
 
     if (!NativeEngine.IsAvailable || !NativeEngine.TryInit())
@@ -355,7 +366,12 @@ static SmokeResult RunSmoke(MainForm form, string workspaceRoot)
     playSlotMethod.Invoke(form, new object[] { new MacroSlot { Name = slotName } });
 
     string startStatus = statusLabel.Text;
-    if (!startStatus.StartsWith("Playing:", StringComparison.Ordinal))
+    bool virtualXboxMissing = startStatus.Contains("VirtualXbox unavailable", StringComparison.Ordinal);
+    if (virtualXboxMissing)
+    {
+        Console.WriteLine("virtualxbox_missing_hud=" + startStatus);
+    }
+    else if (!startStatus.StartsWith("Playing:", StringComparison.Ordinal))
     {
         return SmokeResult.Fail(slotName, "Playback did not enter the expected playing state.", workspaceRoot) with
         {
@@ -367,30 +383,49 @@ static SmokeResult RunSmoke(MainForm form, string workspaceRoot)
     }
 
     var stopwatch = Stopwatch.StartNew();
-    while (stopwatch.Elapsed < TimeSpan.FromSeconds(6))
+    string finalStatus;
+    string finalState;
+    bool slotPlaybackActive;
+    bool enginePlaying;
+    bool success;
+    string failureReason;
+
+    if (virtualXboxMissing)
     {
-        Application.DoEvents();
-        Thread.Sleep(50);
+        finalStatus = startStatus;
+        finalState = typeof(MainForm).GetField(
+            "_currentState",
+            BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(form)?.ToString() ?? "<missing>";
+        slotPlaybackActive = (bool?)typeof(MainForm).GetField(
+            "_slotPlaybackActive",
+            BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(form) ?? true;
+        enginePlaying = NativeEngine.TryIsPlaying();
+        success = finalState == "Idle" && !slotPlaybackActive && !enginePlaying;
+        failureReason = success ? string.Empty : "VirtualXbox-missing HUD left playback running.";
     }
+    else
+    {
+        while (stopwatch.Elapsed < TimeSpan.FromSeconds(6))
+        {
+            Application.DoEvents();
+            Thread.Sleep(50);
+        }
 
-    string finalStatus = statusLabel.Text;
-    string finalState = typeof(MainForm).GetField(
-        "_currentState",
-        BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(form)?.ToString() ?? "<missing>";
-    bool slotPlaybackActive = (bool?)typeof(MainForm).GetField(
-        "_slotPlaybackActive",
-        BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(form) ?? true;
-    bool enginePlaying = NativeEngine.TryIsPlaying();
-
-    bool success =
-        finalStatus == "Idle" &&
-        finalState == "Idle" &&
-        slotPlaybackActive == false &&
-        enginePlaying == false;
-
-    string failureReason = success
-        ? string.Empty
-        : "Playback did not settle back to Idle.";
+        finalStatus = statusLabel.Text;
+        finalState = typeof(MainForm).GetField(
+            "_currentState",
+            BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(form)?.ToString() ?? "<missing>";
+        slotPlaybackActive = (bool?)typeof(MainForm).GetField(
+            "_slotPlaybackActive",
+            BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(form) ?? true;
+        enginePlaying = NativeEngine.TryIsPlaying();
+        success =
+            finalStatus == "Idle" &&
+            finalState == "Idle" &&
+            slotPlaybackActive == false &&
+            enginePlaying == false;
+        failureReason = success ? string.Empty : "Playback did not settle back to Idle.";
+    }
 
     if (!success)
     {
@@ -448,6 +483,35 @@ static SmokeResult RunSmoke(MainForm form, string workspaceRoot)
     }
 
     Console.WriteLine("controller_pulse_status=" + statusLabel.Text);
+
+    form.ExecuteAction(MacroAction.Recorder);
+    Application.DoEvents();
+    if (!statusLabel.Text.Contains("Recording", StringComparison.OrdinalIgnoreCase))
+    {
+        return SmokeResult.Fail(slotName, "Auto-save recording did not start: " + statusLabel.Text, workspaceRoot);
+    }
+
+    NativeEngine.TryRecordKeyEvent(down: true, (ushort)Keys.B, 0);
+    Thread.Sleep(25);
+    NativeEngine.TryRecordKeyEvent(down: false, (ushort)Keys.B, 0);
+    form.ExecuteAction(MacroAction.Recorder);
+    Application.DoEvents();
+    string autosaveStatus = statusLabel.Text;
+    if (!autosaveStatus.StartsWith("Saved:", StringComparison.Ordinal))
+    {
+        return SmokeResult.Fail(slotName, "Recording did not auto-save: " + autosaveStatus, workspaceRoot);
+    }
+
+    string savedRest = autosaveStatus["Saved: ".Length..];
+    int detailIndex = savedRest.LastIndexOf(" (", StringComparison.Ordinal);
+    string savedName = detailIndex >= 0 ? savedRest[..detailIndex] : savedRest;
+    string savedPath = Path.Combine(workspaceRoot, "macros_events", savedName + ".txt");
+    if (!File.Exists(savedPath))
+    {
+        return SmokeResult.Fail(slotName, "Auto-saved recording file was not written: " + savedName, workspaceRoot);
+    }
+    Console.WriteLine("autosave_status=" + autosaveStatus);
+    Console.WriteLine("autosave_file=" + Path.GetFileName(savedPath));
 
     if (Environment.GetEnvironmentVariable("MACROS_SMOKE_VIRTUAL_XBOX") == "1")
     {

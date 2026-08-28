@@ -75,4 +75,19 @@ static inline bool state_is_neutral(const ControllerState *state)
            state->right_thumb_y == 0;
 }
 
+/* Hold off recording until the start chord is fully released. The first
+ * neutral frame clears the wait and is itself not recorded. */
+static inline bool controller_record_after_release(bool *wait_release,
+                                                   const ControllerState *normalized)
+{
+    if (!wait_release || !normalized)
+        return false;
+    if (!*wait_release)
+        return true;
+    if (!state_is_neutral(normalized))
+        return false;
+    *wait_release = false;
+    return false;
+}
+
 #endif /* XINPUT_DIFF_H */

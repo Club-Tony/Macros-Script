@@ -31,10 +31,9 @@ foreach (var scenario in scenarios)
     form.Show();
     form.PerformLayout();
     Application.DoEvents();
-    // Draw the entire window, including non-client chrome. Using ClientSize as
-    // the bitmap bounds clips bottom-docked controls on bordered forms.
-    using var image = new Bitmap(form.Width, form.Height, PixelFormat.Format32bppArgb);
-    form.DrawToBitmap(image, new Rectangle(Point.Empty, form.Size));
+    using Bitmap image = form is PaletteForm paletteForm
+        ? paletteForm.RenderToBitmap()
+        : CaptureForm(form);
     form.Hide();
     string actualPath = Path.Combine(artifactDirectory, scenario.Name + ".png");
     image.Save(actualPath, ImageFormat.Png);
@@ -62,6 +61,15 @@ foreach (var scenario in scenarios)
 }
 
 Environment.ExitCode = failures == 0 ? 0 : 1;
+
+static Bitmap CaptureForm(Form form)
+{
+    // Draw the entire window, including non-client chrome. Using ClientSize as
+    // the bitmap bounds clips bottom-docked controls on bordered forms.
+    var image = new Bitmap(form.Width, form.Height, PixelFormat.Format32bppArgb);
+    form.DrawToBitmap(image, new Rectangle(Point.Empty, form.Size));
+    return image;
+}
 
 static PaletteForm Palette(string status, AppSettings settings)
 {

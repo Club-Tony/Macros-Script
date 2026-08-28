@@ -250,6 +250,33 @@ public static class ControllerControls
     private const ushort Y = 0x8000;
     public const byte TriggerThreshold = 30;
 
+    public static ushort ToButtonMask(IEnumerable<ControllerControl> controls)
+    {
+        ushort mask = 0;
+        foreach (ControllerControl control in controls)
+        {
+            mask |= control switch
+            {
+                ControllerControl.DPadUp => DPadUp,
+                ControllerControl.DPadDown => DPadDown,
+                ControllerControl.DPadLeft => DPadLeft,
+                ControllerControl.DPadRight => DPadRight,
+                ControllerControl.Start => Start,
+                ControllerControl.Back => Back,
+                ControllerControl.LeftThumb => LeftThumb,
+                ControllerControl.RightThumb => RightThumb,
+                ControllerControl.LeftShoulder => LeftShoulder,
+                ControllerControl.RightShoulder => RightShoulder,
+                ControllerControl.A => A,
+                ControllerControl.B => B,
+                ControllerControl.X => X,
+                ControllerControl.Y => Y,
+                _ => (ushort)0
+            };
+        }
+        return mask;
+    }
+
     public static ControllerControl[] FromState(ControllerState state)
     {
         var controls = new List<ControllerControl>();

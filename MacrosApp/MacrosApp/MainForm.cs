@@ -32,6 +32,8 @@ public partial class MainForm : Form
     private bool _slotPlaybackActive;
     private RecordingInputHook? _recordingInputHook;
     private DateTime _recordingIgnoreUntilUtc = DateTime.MinValue;
+    private bool _recordingSawController;
+    private IReadOnlyList<ControllerControl> _recorderChord = Array.Empty<ControllerControl>();
     private bool _hotkeysSuspended;
     private KeyboardToggleBinding? _holdKeyBinding;
     private System.Threading.Timer? _turboRepeatTimer;
@@ -70,6 +72,11 @@ public partial class MainForm : Form
             string text = profileStatusLabel?.Text ?? "Profile: Default";
             return text.StartsWith("Profile: ", StringComparison.Ordinal) ? text[9..] : text;
         }
+    }
+
+    public void SetRecorderChord(IReadOnlyList<ControllerControl> chord)
+    {
+        _recorderChord = chord ?? Array.Empty<ControllerControl>();
     }
 
     public enum MacroState
@@ -254,7 +261,7 @@ public partial class MainForm : Form
         _hoverHelp.SetToolTip(btnPureHold,
             "Configures Pure Hold. You choose a key, then that key toggles a held-down state until pressed again.");
         _hoverHelp.SetToolTip(btnRecorder,
-            "Starts keyboard and mouse recording. Press F5 again to stop, then save the recording into a slot.");
+            "Starts keyboard, mouse, and controller recording. Press the recorder binding again to stop and auto-save.");
 
         _hoverHelp.SetToolTip(slotHeaderLabel,
             "Saved recordings loaded from macros.ini and macros_events. Select one to replay, rename, export, or delete it.");
@@ -742,7 +749,11 @@ public partial class MainForm : Form
                 StopSlotPlaybackTracking();
             }
 
-            if (!TryPrepareControllerOutputForPlayback(hasControllerEvents, out controllerOutputReady, out controllerOutputStatus))
+            if (!TryPrepareControllerOutputForPlayback(
+                    hasControllerEvents,
+                    requireVirtualXbox: hasControllerEvents,
+                    out controllerOutputReady,
+                    out controllerOutputStatus))
             {
                 SetState(MacroState.Idle, controllerOutputStatus);
                 return;
@@ -792,6 +803,7 @@ public partial class MainForm : Form
 
     private bool TryPrepareControllerOutputForPlayback(
         bool hasControllerEvents,
+        bool requireVirtualXbox,
         out bool outputReady,
         out string status)
     {
@@ -804,14 +816,14 @@ public partial class MainForm : Form
             return true;
         }
 
-        if (_settings.ControllerOutput == ControllerOutputType.VirtualXbox)
+        if (NativeEngine.TryUseVirtualXboxControllerOutput(out var error))
         {
-            if (NativeEngine.TryUseVirtualXboxControllerOutput(out var error))
-            {
-                status = "VirtualXbox";
-                return true;
-            }
+            status = "VirtualXbox";
+            return true;
+        }
 
+        if (requireVirtualXbox || _settings.ControllerOutput == ControllerOutputType.VirtualXbox)
+        {
             outputReady = false;
             status = string.IsNullOrWhiteSpace(error)
                 ? "VirtualXbox unavailable"
@@ -907,6 +919,7 @@ public partial class MainForm : Form
 
             if (!TryPrepareControllerOutputForPlayback(
                     hasControllerEvents: true,
+                    requireVirtualXbox: false,
                     out outputReady,
                     out outputStatus))
             {
@@ -1300,7 +1313,9 @@ public partial class MainForm : Form
     {
         if (!NativeEngine.TryInit() || !NativeEngine.TryStartRecording())
             return false;
+        NativeEngine.TryStartPolling(4);
         NativeEngine.TryStartControllerRecording();
+        _recordingSawController = false;
 
         DisposeRecordingHook();
 
@@ -1315,6 +1330,7 @@ public partial class MainForm : Form
             hook.Dispose();
             NativeEngine.TryStopControllerRecording();
             NativeEngine.TryStopRecording();
+            NativeEngine.TryStartPolling(16);
             return false;
         }
 
@@ -1328,9 +1344,12 @@ public partial class MainForm : Form
         DisposeRecordingHook();
         NativeEngine.TryStopControllerRecording();
         NativeEngine.TryStopRecording();
+        NativeEngine.TryStartPolling(16);
 
         _activeMacroType = null;
         ResetAllButtons();
+
+        _recordingSawController = false;
 
         uint recordedCount = NativeEngine.TryGetRecordedEventCount();
         if (recordedCount == 0)
@@ -1339,34 +1358,23 @@ public partial class MainForm : Form
             return;
         }
 
-        string defaultName = slotList.SelectedSlot?.Name ?? $"recording-{DateTime.Now:yyyyMMdd-HHmmss}";
-        _hotkeysSuspended = true;
-        string? slotName;
-        try
+        string slotName = _slotManager.AllocateRecordingName(DateTime.Now);
+        if (!PersistRecordedEvents(slotName, out uint savedCount))
         {
-            slotName = ShowInputDialog("Save Recording", "Name this recording:", defaultName);
-        }
-        finally
-        {
-            _hotkeysSuspended = false;
+            SetState(MacroState.Idle, $"Save failed: {slotName}");
+            return;
         }
 
-        if (slotName == null)
+        savedCount = StripRecorderChordNoise(slotName, savedCount);
+        if (savedCount == 0)
         {
+            _slotManager.DeleteSlot(slotName);
             SetState(MacroState.Idle, "Recording discarded");
             return;
         }
 
-        slotName = string.IsNullOrWhiteSpace(slotName) ? defaultName : slotName.Trim();
-        string normalizedSlotName = _slotManager.NormalizeSlotName(slotName);
-        if (!PersistRecordedEvents(normalizedSlotName, out uint savedCount))
-        {
-            SetState(MacroState.Idle, $"Save failed: {normalizedSlotName}");
-            return;
-        }
-
-        RefreshSlotList(normalizedSlotName);
-        SetState(MacroState.Idle, $"Saved: {normalizedSlotName} ({savedCount} events)");
+        RefreshSlotList(slotName);
+        SetState(MacroState.Idle, $"Saved: {slotName} ({savedCount} events)");
     }
 
     private bool PersistRecordedEvents(string slotName, out uint savedCount)
@@ -1418,7 +1426,7 @@ public partial class MainForm : Form
 
     private void OnRecordedMouseMoveCaptured(int x, int y)
     {
-        if (ShouldIgnoreRecordedInput())
+        if (ShouldIgnoreRecordedInput() || ShouldIgnoreRecordedMouseMove())
             return;
 
         NativeEngine.TryRecordMouseMove(x, y);
@@ -1443,6 +1451,95 @@ public partial class MainForm : Form
     private bool ShouldIgnoreRecordedInput()
     {
         return DateTime.UtcNow < _recordingIgnoreUntilUtc;
+    }
+
+    private bool ShouldIgnoreRecordedMouseMove()
+    {
+        if (_recordingSawController)
+            return true;
+
+        if (!ControllerLooksActive())
+            return false;
+
+        _recordingSawController = true;
+        return true;
+    }
+
+    private static bool ControllerLooksActive()
+    {
+        for (uint i = 0; i < 4; i++)
+        {
+            if (!NativeEngine.TryGetControllerState(i, out ControllerState state) || !state.Connected)
+                continue;
+            if (state.Buttons != 0 || state.LeftTrigger > 0 || state.RightTrigger > 0)
+                return true;
+            if (Math.Abs(state.LeftThumbX) > 1000 || Math.Abs(state.LeftThumbY) > 1000 ||
+                Math.Abs(state.RightThumbX) > 1000 || Math.Abs(state.RightThumbY) > 1000)
+                return true;
+        }
+
+        return false;
+    }
+
+    private uint StripRecorderChordNoise(string slotName, uint savedCount)
+    {
+        string eventPath = _slotManager.GetEventFilePath(slotName);
+        if (!File.Exists(eventPath))
+            return savedCount;
+
+        var lines = File.ReadAllLines(eventPath).ToList();
+        while (lines.Count > 0 && IsRecorderChordNoise(lines[0]))
+            lines.RemoveAt(0);
+        while (lines.Count > 0 && IsRecorderChordNoise(lines[^1]))
+            lines.RemoveAt(lines.Count - 1);
+
+        File.WriteAllLines(eventPath, lines);
+        uint remaining = (uint)lines.Count(line => !string.IsNullOrWhiteSpace(line) && !line.StartsWith(';'));
+        if (remaining != savedCount)
+        {
+            _slotManager.SaveSlot(new MacroSlot
+            {
+                Name = slotName,
+                EventCount = (int)remaining,
+                CoordMode = "screen",
+                Recorded = DateTime.Now.ToString("yyyy-MM-dd")
+            });
+        }
+
+        return remaining;
+    }
+
+    private bool IsRecorderChordNoise(string line)
+    {
+        if (_recorderChord.Count == 0 || !line.StartsWith("C|", StringComparison.Ordinal))
+            return false;
+
+        string[] parts = line.Split('|');
+        if (parts.Length != 9)
+            return false;
+        if (!ushort.TryParse(parts[1], out ushort buttons) ||
+            !int.TryParse(parts[2], out int leftTrigger) ||
+            !int.TryParse(parts[3], out int rightTrigger) ||
+            !int.TryParse(parts[4], out int leftX) ||
+            !int.TryParse(parts[5], out int leftY) ||
+            !int.TryParse(parts[6], out int rightX) ||
+            !int.TryParse(parts[7], out int rightY))
+            return false;
+
+        if (leftX != 0 || leftY != 0 || rightX != 0 || rightY != 0)
+            return false;
+
+        ushort buttonMask = ControllerControls.ToButtonMask(_recorderChord);
+        bool usesLeftTrigger = _recorderChord.Contains(ControllerControl.LeftTrigger);
+        bool usesRightTrigger = _recorderChord.Contains(ControllerControl.RightTrigger);
+        if ((buttons & ~buttonMask) != 0)
+            return false;
+        if (!usesLeftTrigger && leftTrigger > 0)
+            return false;
+        if (!usesRightTrigger && rightTrigger > 0)
+            return false;
+
+        return buttons != 0 || leftTrigger > 0 || rightTrigger > 0;
     }
 
     private static bool IsRecorderControlKey(ushort vkCode)
