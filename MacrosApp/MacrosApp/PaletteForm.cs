@@ -155,7 +155,7 @@ public sealed class PaletteForm : Form
 
     public void ShowPalette(bool keepVisible)
     {
-        Rectangle workArea = Screen.PrimaryScreen?.WorkingArea ?? Screen.GetWorkingArea(Cursor.Position);
+        Rectangle workArea = ResolveTargetWorkArea();
         Location = new Point(workArea.Right - Width - 24, workArea.Bottom - Height - 24);
         SetWindowPos(Handle, new IntPtr(-1), Left, Top, Width, Height, SwpNoActivate | SwpShowWindow);
         PresentHud();
@@ -259,6 +259,22 @@ public sealed class PaletteForm : Form
         public byte SourceConstantAlpha;
         public byte AlphaFormat;
     }
+
+    private static Rectangle ResolveTargetWorkArea()
+    {
+        IntPtr foreground = GetForegroundWindow();
+        if (foreground != IntPtr.Zero)
+        {
+            Screen screen = Screen.FromHandle(foreground);
+            if (screen != null)
+                return screen.WorkingArea;
+        }
+
+        return Screen.FromPoint(Cursor.Position).WorkingArea;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
 
     [DllImport("user32.dll")]
     private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
