@@ -1,0 +1,629 @@
+using System.Runtime.InteropServices;
+
+namespace MacrosApp;
+
+/// <summary>
+/// Mirrors the C ControllerState struct with explicit Pack=1 to match
+/// the C compiler's layout (bool=1 byte, then uint16_t with possible padding).
+/// Using Pack=2 matches the natural alignment of the C struct.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 2)]
+public struct ControllerState
+{
+    [MarshalAs(UnmanagedType.I1)] public bool Connected;
+    public ushort Buttons;
+    public short LeftThumbX, LeftThumbY;
+    public short RightThumbX, RightThumbY;
+    public byte LeftTrigger, RightTrigger;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+public struct VJoyState
+{
+    [MarshalAs(UnmanagedType.I1)] public bool Available;
+    [MarshalAs(UnmanagedType.I1)] public bool Enabled;
+    [MarshalAs(UnmanagedType.I1)] public bool Ready;
+    public uint DeviceId;
+    public uint Status;
+    public uint ButtonCount;
+    public uint ContPovCount;
+    public uint DiscPovCount;
+    public uint AxisExistsMask;
+}
+
+public static class NativeEngine
+{
+    private const string DllName = "MacrosEngine.dll";
+    // We only need a temporary native buffer large enough for the engine to parse and copy.
+    private const int MaxNativeMacroEventBytes = 64;
+    private const uint ControllerOutputVJoy = 0;
+    private const uint ControllerOutputCallback = 1;
+
+    private static bool _available;
+    private static bool _checked;
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    private delegate bool ControllerOutputCallbackDelegate(IntPtr state);
+
+    private static readonly ControllerOutputCallbackDelegate s_virtualXboxCallback = DispatchVirtualXboxOutput;
+    private static readonly IntPtr s_virtualXboxCallbackPtr =
+        Marshal.GetFunctionPointerForDelegate(s_virtualXboxCallback);
+
+    /// <summary>
+    /// Whether the native DLL is loaded and available.
+    /// </summary>
+    public static bool IsAvailable
+    {
+        get
+        {
+            if (!_checked)
+            {
+                _checked = true;
+                try
+                {
+                    var version = Marshal.PtrToStringAnsi(Engine_GetVersion());
+                    _available = version != null;
+                }
+                catch (DllNotFoundException)
+                {
+                    _available = false;
+                }
+                catch (EntryPointNotFoundException)
+                {
+                    _available = false;
+                }
+            }
+            return _available;
+        }
+    }
+
+    // ================================================================
+    // Engine lifecycle
+    // ================================================================
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Engine_Init();
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Engine_Shutdown();
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Engine_IsInitialized();
+
+    // ================================================================
+    // Controller polling
+    // ================================================================
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Engine_StartPolling(uint intervalMs);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Engine_StopPolling();
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Engine_GetControllerState(uint playerIndex, out ControllerState state);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Engine_SetDeadzone(uint playerIndex, short thumbDeadzone, byte triggerDeadzone);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Engine_StartControllerRecording();
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Engine_StopControllerRecording();
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Engine_IsRecordingController();
+
+    // ================================================================
+    // Recording
+    // ================================================================
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Engine_StartRecording();
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Engine_StopRecording();
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Engine_IsRecording();
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Engine_GetRecordedEventCount();
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Engine_GetRecordedEvents(IntPtr buffer, uint bufferSize, out uint outCount);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Engine_RecordKeyEvent(
+        [MarshalAs(UnmanagedType.I1)] bool down, ushort vkCode, ushort scanCode);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Engine_RecordMouseMove(int x, int y);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Engine_RecordMouseButton(
+        [MarshalAs(UnmanagedType.I1)] bool down, ushort button);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Engine_RecordMouseWheel(int delta);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Engine_RecordControllerEvent(ref ControllerState state);
+
+    // ================================================================
+    // Playback
+    // ================================================================
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Engine_StartPlayback(IntPtr events, uint count, uint loopCount);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Engine_StopPlayback();
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Engine_PausePlayback();
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Engine_ResumePlayback();
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Engine_IsPlaying();
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Engine_IsPaused();
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Engine_SetControllerOutputMode(uint mode);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Engine_GetControllerOutputMode();
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void Engine_SetControllerOutputCallback(IntPtr callback);
+
+    // ================================================================
+    // vJoy output
+    // ================================================================
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Engine_SetVJoyDeviceId(uint deviceId);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Engine_GetVJoyState(out VJoyState state);
+
+    // ================================================================
+    // Event file I/O
+    // ================================================================
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+    public static extern uint Engine_LoadEventsFromFile(string path, IntPtr buffer, uint bufferSize);
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Engine_SaveEventsToFile(string path, IntPtr events, uint count);
+
+    // ================================================================
+    // Version
+    // ================================================================
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern IntPtr Engine_GetVersion();
+
+    // ================================================================
+    // Safe wrappers that check availability first
+    // ================================================================
+
+    public static bool TryInit()
+    {
+        if (!IsAvailable) return false;
+        try { return Engine_Init(); }
+        catch { return false; }
+    }
+
+    public static void TryShutdown()
+    {
+        if (!IsAvailable)
+        {
+            VirtualXboxOutput.Disconnect();
+            return;
+        }
+
+        try
+        {
+            TryResetControllerOutput(disconnectVirtualXbox: true);
+            Engine_Shutdown();
+        }
+        catch
+        {
+            VirtualXboxOutput.Disconnect();
+        }
+    }
+
+    public static bool TryGetControllerState(uint playerIndex, out ControllerState state)
+    {
+        state = default;
+        if (!IsAvailable) return false;
+        try { return Engine_GetControllerState(playerIndex, out state); }
+        catch { return false; }
+    }
+
+    public static bool TryStartPolling(uint intervalMs)
+    {
+        if (!IsAvailable) return false;
+        try { return Engine_StartPolling(intervalMs); }
+        catch { return false; }
+    }
+
+    public static void TryStopPolling()
+    {
+        if (!IsAvailable) return;
+        try { Engine_StopPolling(); } catch { }
+    }
+
+    public static bool TryStartControllerRecording()
+    {
+        if (!IsAvailable) return false;
+        try { return Engine_StartControllerRecording(); }
+        catch { return false; }
+    }
+
+    public static void TryStopControllerRecording()
+    {
+        if (!IsAvailable) return;
+        try { Engine_StopControllerRecording(); } catch { }
+    }
+
+    public static bool TryIsRecordingController()
+    {
+        if (!IsAvailable) return false;
+        try { return Engine_IsRecordingController(); }
+        catch { return false; }
+    }
+
+    public static bool TryStartRecording()
+    {
+        if (!IsAvailable) return false;
+        try { return Engine_StartRecording(); }
+        catch { return false; }
+    }
+
+    public static void TryStopRecording()
+    {
+        if (!IsAvailable) return;
+        try { Engine_StopRecording(); } catch { }
+    }
+
+    public static bool TryIsRecording()
+    {
+        if (!IsAvailable) return false;
+        try { return Engine_IsRecording(); }
+        catch { return false; }
+    }
+
+    public static uint TryGetRecordedEventCount()
+    {
+        if (!IsAvailable) return 0;
+        try { return Engine_GetRecordedEventCount(); }
+        catch { return 0; }
+    }
+
+    public static bool TryGetRecordedEventsBuffer(out IntPtr buffer, out uint count)
+    {
+        buffer = IntPtr.Zero;
+        count = 0;
+
+        if (!IsAvailable)
+            return false;
+
+        try
+        {
+            uint capacity = Engine_GetRecordedEventCount();
+            if (capacity == 0)
+                return false;
+
+            long bytes = checked((long)capacity * MaxNativeMacroEventBytes);
+            buffer = Marshal.AllocHGlobal((IntPtr)bytes);
+            if (!Engine_GetRecordedEvents(buffer, capacity, out count) || count == 0)
+            {
+                Marshal.FreeHGlobal(buffer);
+                buffer = IntPtr.Zero;
+                count = 0;
+                return false;
+            }
+
+            return true;
+        }
+        catch
+        {
+            if (buffer != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(buffer);
+                buffer = IntPtr.Zero;
+            }
+            count = 0;
+            return false;
+        }
+    }
+
+    public static bool TryRecordKeyEvent(bool down, ushort vkCode, ushort scanCode)
+    {
+        if (!IsAvailable) return false;
+        try { return Engine_RecordKeyEvent(down, vkCode, scanCode); }
+        catch { return false; }
+    }
+
+    public static bool TryRecordMouseMove(int x, int y)
+    {
+        if (!IsAvailable) return false;
+        try { return Engine_RecordMouseMove(x, y); }
+        catch { return false; }
+    }
+
+    public static bool TryRecordMouseButton(bool down, ushort button)
+    {
+        if (!IsAvailable) return false;
+        try { return Engine_RecordMouseButton(down, button); }
+        catch { return false; }
+    }
+
+    public static bool TryRecordMouseWheel(int delta)
+    {
+        if (!IsAvailable) return false;
+        try { return Engine_RecordMouseWheel(delta); }
+        catch { return false; }
+    }
+
+    public static bool TryRecordControllerEvent(ControllerState state)
+    {
+        if (!IsAvailable) return false;
+        state.Connected = true;
+        try { return Engine_RecordControllerEvent(ref state); }
+        catch { return false; }
+    }
+
+    public static bool TryStartPlayback(IntPtr events, uint count, uint loopCount)
+    {
+        if (!IsAvailable) return false;
+        try { return Engine_StartPlayback(events, count, loopCount); }
+        catch { return false; }
+    }
+
+    public static void TryStopPlayback()
+    {
+        if (!IsAvailable) return;
+        try { Engine_StopPlayback(); } catch { }
+    }
+
+    public static bool TryIsPlaying()
+    {
+        if (!IsAvailable) return false;
+        try { return Engine_IsPlaying(); }
+        catch { return false; }
+    }
+
+    public static bool TryIsPaused()
+    {
+        if (!IsAvailable) return false;
+        try { return Engine_IsPaused(); }
+        catch { return false; }
+    }
+
+    public static void TryPausePlayback()
+    {
+        if (!IsAvailable) return;
+        try { Engine_PausePlayback(); } catch { }
+    }
+
+    public static void TryResumePlayback()
+    {
+        if (!IsAvailable) return;
+        try { Engine_ResumePlayback(); } catch { }
+    }
+
+    public static bool TryUseVJoyControllerOutput()
+    {
+        if (!IsAvailable) return false;
+
+        try
+        {
+            Engine_SetControllerOutputCallback(IntPtr.Zero);
+            return Engine_SetControllerOutputMode(ControllerOutputVJoy);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public static bool TryUseVirtualXboxControllerOutput(out string error)
+    {
+        error = string.Empty;
+
+        if (!IsAvailable)
+        {
+            error = "Native engine is not available.";
+            return false;
+        }
+
+        if (!VirtualXboxOutput.TryEnsureConnected(out error))
+            return false;
+
+        try
+        {
+            Engine_SetControllerOutputCallback(s_virtualXboxCallbackPtr);
+            if (Engine_SetControllerOutputMode(ControllerOutputCallback))
+                return true;
+
+            error = "Native engine rejected callback controller output.";
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+
+        TryResetControllerOutput(disconnectVirtualXbox: true);
+        return false;
+    }
+
+    public static bool TryEnsureVirtualXboxConnected(out string error)
+    {
+        return VirtualXboxOutput.TryEnsureConnected(out error);
+    }
+
+    public static bool IsVirtualXboxConnected => VirtualXboxOutput.IsConnected;
+
+    public static void TryDisconnectVirtualXbox()
+    {
+        VirtualXboxOutput.Disconnect();
+    }
+
+    public static void TryResetControllerOutput(bool disconnectVirtualXbox = true)
+    {
+        if (IsAvailable)
+        {
+            try
+            {
+                Engine_SetControllerOutputMode(ControllerOutputVJoy);
+                Engine_SetControllerOutputCallback(IntPtr.Zero);
+            }
+            catch
+            {
+            }
+        }
+
+        if (disconnectVirtualXbox)
+            VirtualXboxOutput.Disconnect();
+        else
+            _ = VirtualXboxOutput.TryResetReport(out _);
+    }
+
+    public static bool TrySetVJoyDeviceId(uint deviceId)
+    {
+        if (!IsAvailable) return false;
+        try { return Engine_SetVJoyDeviceId(deviceId); }
+        catch { return false; }
+    }
+
+    public static bool TryGetVJoyState(out VJoyState state)
+    {
+        state = default;
+        if (!IsAvailable) return false;
+        try { return Engine_GetVJoyState(out state); }
+        catch { return false; }
+    }
+
+    public static bool TrySaveEventsToFile(string path, IntPtr events, uint count)
+    {
+        if (!IsAvailable) return false;
+        try { return Engine_SaveEventsToFile(path, events, count); }
+        catch { return false; }
+    }
+
+    public static bool TryLoadPlaybackBuffer(string path, out IntPtr buffer, out uint count)
+    {
+        buffer = IntPtr.Zero;
+        count = 0;
+
+        if (!IsAvailable || string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            return false;
+
+        try
+        {
+            uint capacity = EstimateEventCapacity(path);
+            if (capacity == 0)
+                return false;
+
+            long bytes = checked((long)capacity * MaxNativeMacroEventBytes);
+            buffer = Marshal.AllocHGlobal((IntPtr)bytes);
+            count = Engine_LoadEventsFromFile(path, buffer, capacity);
+            if (count == 0)
+            {
+                Marshal.FreeHGlobal(buffer);
+                buffer = IntPtr.Zero;
+                return false;
+            }
+
+            return true;
+        }
+        catch
+        {
+            if (buffer != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(buffer);
+                buffer = IntPtr.Zero;
+            }
+            count = 0;
+            return false;
+        }
+    }
+
+    public static void FreePlaybackBuffer(IntPtr buffer)
+    {
+        if (buffer == IntPtr.Zero)
+            return;
+
+        Marshal.FreeHGlobal(buffer);
+    }
+
+    public static void FreeRecordedEventsBuffer(IntPtr buffer)
+    {
+        if (buffer == IntPtr.Zero)
+            return;
+
+        Marshal.FreeHGlobal(buffer);
+    }
+
+    private static uint EstimateEventCapacity(string path)
+    {
+        uint count = 0;
+
+        foreach (var rawLine in File.ReadLines(path))
+        {
+            var line = rawLine.Trim();
+            if (line.Length == 0 || line.StartsWith(';'))
+                continue;
+
+            count++;
+        }
+
+        return count;
+    }
+
+    private static bool DispatchVirtualXboxOutput(IntPtr statePtr)
+    {
+        if (statePtr == IntPtr.Zero)
+            return false;
+
+        try
+        {
+            var state = Marshal.PtrToStructure<ControllerState>(statePtr);
+            return VirtualXboxOutput.TryDispatch(state, out _);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+}

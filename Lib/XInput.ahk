@@ -175,13 +175,13 @@ XInput_Init(dll="xinput1_3.dll", silent := false)
         return false
     }
 
-    _XInput_GetState        := DllCall("GetProcAddress", "ptr", _XInput_hm, "uint", 100) ; guide/home button works with this. __stdcall int secret_get_gamepad (int, XINPUT_GAMEPAD_SECRET*)
+    _XInput_GetState        := DllCall("GetProcAddress", "ptr", _XInput_hm, "uint", 100, "ptr") ; guide/home button works with this. __stdcall int secret_get_gamepad (int, XINPUT_GAMEPAD_SECRET*)
     if (!_XInput_GetState)
-        _XInput_GetState    := DllCall("GetProcAddress", "ptr", _XInput_hm, "AStr", "XInputGetState")
-    _XInput_SetState        := DllCall("GetProcAddress", "ptr", _XInput_hm, "AStr", "XInputSetState")
-    _XInput_GetKeystroke    := DllCall("GetProcAddress", "ptr", _XInput_hm, "AStr", "XInputGetKeystroke")
-    _XInput_GetCapabilities := DllCall("GetProcAddress", "ptr", _XInput_hm, "AStr", "XInputGetCapabilities")
-    _XInput_GetBatteryInformation := DllCall("GetProcAddress", "ptr", _XInput_hm, "AStr", "XInputGetBatteryInformation")
+        _XInput_GetState    := DllCall("GetProcAddress", "ptr", _XInput_hm, "AStr", "XInputGetState", "ptr")
+    _XInput_SetState        := DllCall("GetProcAddress", "ptr", _XInput_hm, "AStr", "XInputSetState", "ptr")
+    _XInput_GetKeystroke    := DllCall("GetProcAddress", "ptr", _XInput_hm, "AStr", "XInputGetKeystroke", "ptr")
+    _XInput_GetCapabilities := DllCall("GetProcAddress", "ptr", _XInput_hm, "AStr", "XInputGetCapabilities", "ptr")
+    _XInput_GetBatteryInformation := DllCall("GetProcAddress", "ptr", _XInput_hm, "AStr", "XInputGetBatteryInformation", "ptr")
     
     ;OnExit, XInput_Term__
     if !(_XInput_GetState && _XInput_SetState && _XInput_GetKeystroke && _XInput_GetCapabilities && _XInput_GetBatteryInformation) {

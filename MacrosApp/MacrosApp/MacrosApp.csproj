@@ -1,0 +1,27 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <PlatformTarget>x64</PlatformTarget>
+    <MacrosEngineDllPath Condition="Exists('..\..\MacrosEngine\build-x64\MacrosEngine.dll')">..\..\MacrosEngine\build-x64\MacrosEngine.dll</MacrosEngineDllPath>
+    <MacrosEngineDllPath Condition="'$(MacrosEngineDllPath)' == '' and Exists('..\..\MacrosEngine\build\MacrosEngine.dll')">..\..\MacrosEngine\build\MacrosEngine.dll</MacrosEngineDllPath>
+    <MacrosEngineDllPath Condition="'$(MacrosEngineDllPath)' == '' and Exists('..\..\MacrosEngine\build\libMacrosEngine.dll')">..\..\MacrosEngine\build\libMacrosEngine.dll</MacrosEngineDllPath>
+  </PropertyGroup>
+
+  <Target Name="CopyMacrosEngine" AfterTargets="Build" Condition="'$(MacrosEngineDllPath)' != ''">
+    <Copy SourceFiles="$(MacrosEngineDllPath)"
+          DestinationFiles="$(OutDir)MacrosEngine.dll" />
+  </Target>
+
+  <ItemGroup>
+    <Reference Include="Nefarius.ViGEm.Client">
+      <HintPath>..\lib\Nefarius.ViGEm.Client.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

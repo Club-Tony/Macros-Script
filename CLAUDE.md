@@ -1,57 +1,34 @@
 # Repository guidance
 
+## Product direction
 
-## Project Overview
+Treat `MacrosApp` plus `MacrosEngine` as the primary product. It is a tray-first Windows 11 application whose main UX constraint is preserving foreground-game focus. The full WinForms window is for setup and management; the compact palette must remain `WS_EX_NOACTIVATE`, topmost, taskbar-hidden, and non-modal.
 
-AutoHotkey v1 macro automation script providing fast clicking, key holds, autoclicker, and input recording/playback with both keyboard/mouse and Xbox-style controller support.
+The AHK v1 `Macros.ahk` implementation on `main` is a frozen fallback at commit `05226d8`, materialized in `..\Macros-Script-Legacy-05226d8`. Do not modernize that frozen copy. `Macros_v2.ahk` and `Lib_v2/` are archived and should not receive new product work.
 
 ## Architecture
 
-**Main Script**: `Macros.ahk` - Single-file automation script with modular state machine design
+- `MacrosApp/MacrosApp/`: WinForms lifecycle, tray, onboarding, settings, bindings, palette, and local control channel.
+- `MacrosEngine/`: native C recording/playback engine and stable ABI.
+- `MacrosApp/MacrosApp/InputBindingRuntime.cs`: background Raw Input plus controller polling and chord latching.
+- `%LocalAppData%\Macros-Script\settings.json`: versioned application and binding settings, saved atomically.
+- `macros.ini`, `macros_events/*.txt`, `profiles.ini`: backward-compatible legacy data formats.
+- `tools/legacy/`: canonical frozen-launcher and shortcut-installer scripts copied beside the detached worktree.
 
-**Libraries** (in `Lib/`):
-- `XInput.ahk` - Xbox controller API wrapper (XInput DLL interface)
-- `VJoy_lib.ahk` - Virtual joystick driver interface for controller playback
-- `Recorder_Keys.ahk` - Keyboard/mouse hook definitions for macro recording
+Keep XInput, SendInput, vJoy, and VirtualXbox isolated behind their existing runtime boundaries. Do not rewrite working engine code merely to adopt a new input API. GameInput is an investigation item. ViGEmBus is retired; retain compatibility without expanding the dependency.
 
-**State Machine Pattern**: The script uses global state variables with `#If` context-sensitive hotkeys to manage different modes (menu active, slash macro on, autoclicker ready, recorder active, etc.).
+## Safety and focus invariants
 
-## Key Concepts
+- Physical binding input passes through to the game; capture observes and does not suppress.
+- A held chord fires once and rearms only after release.
+- Exact duplicate action bindings are rejected.
+- Palette show/hide must never change the foreground window.
+- The frozen legacy runtime must never run concurrently with MacrosApp or another Macros AHK runtime.
+- Runtime switching is graceful only. Never force-kill a process that may hold keys or virtual controls.
+- Do not build anti-cheat bypass, elevated-input bypass, stealth-driver, or injection behavior.
 
-**Macro Types**:
-- Slash Macro (`F1`): Maps `/` key to left click
-- Autoclicker (`F2`): Configurable interval auto-clicking
-- Turbo Hold (`F3`): Rapid key repeat while toggled
-- Pure Hold (`F4`): Simple key down/up toggle
-- Recorder (`F5`): Records and plays back keyboard, mouse, and controller input
+## Validation
 
-**Controller Integration**:
-- Requires XInput-compatible controller (Xbox, or PlayStation via DS4Windows)
-- Controller playback requires vJoy driver installation
-- Button combos: `L1+L2+R1+R2+A/B/Y/X` for various functions
-- 500ms suppression period prevents recording the trigger combo itself
+Use `python tests/live/run_live_tests.py macros` for the normal gate and `python tests/live/run_live_tests.py macros --fixture visual` for explicit committed UI fixtures. Baseline updates require `--update-baselines` and human review. Follow `TESTING.md` for the supervised game matrix. Do not run GUI fixtures unattended during gameplay.
 
-**SendMode Toggle** (`Ctrl+Alt+P`): Switches between `SendInput` (default) and `SendPlay` for compatibility with games that block SendInput.
-
-## Hotkeys Reference
-
-| Hotkey | Action |
-|--------|--------|
-| `Ctrl+Shift+Alt+Z` | Open macro menu |
-| `Ctrl+Alt+T` | Show hotkey help (only when menu is open) |
-| `Ctrl+Esc` | Reload script |
-| `Ctrl+Alt+P` | Toggle SendMode (Input/Play) |
-| `Esc` | Cancel/exit current macro mode |
-| `F12` | Toggle playback (after recording) |
-
-## Development Notes
-
-- AutoHotkey v1 syntax (`#Requires AutoHotkey v1`)
-- Uses `#Include <LibName>` for library imports from `Lib/` folder
-- Debug system (`Lib/Debug.ahk`) is available but currently disabled -- the `#Include` is commented out in Macros.ahk
-- Controller recording uses normalization with configurable deadzones (`controllerThumbDeadzone`, `controllerTriggerDeadzone`)
-
-## When Adding/Modifying Hotkeys
-
-1. **Update README.md** - Document new hotkeys in the appropriate section
-2. **Update `ShowHotkeyHelp()`** in Macros.ahk - The built-in tooltip help (Ctrl+Alt+T) should include all hotkeys
+Plans are indexed in `Plans/README.md`. Do not reopen completed historical plans unless the user explicitly changes their status.

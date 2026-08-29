@@ -1,14 +1,19 @@
 #Requires AutoHotkey v1
 #NoEnv ; Prevents Unnecessary Environment Variable lookup
 #SingleInstance, Force ; Removes script already open warning when reloading scripts
+#Include %A_ScriptDir%\Lib\ScriptSingleton.ahk
+EnsureScriptSingleton()
 #InstallKeybdHook
 #UseHook
 #InputLevel 1  ; Only respond to physical keypresses, improves game compatibility
-#Warn
+#Warn, UseUnsetLocal
+#Warn, UseUnsetGlobal, Off
 #Warn, LocalSameAsGlobal, Off
 #Warn, Unreachable, Off
 #Include <XInput>
 #Include <VJoy_lib>
+#Include <Slots>
+#Include <Profiles>
 SendMode Input
 SetWorkingDir, %A_ScriptDir%
 
@@ -95,8 +100,58 @@ hVJDLL := 0
 sendMode := "Input"
 sendModeTip := "SendMode: Input (toggle: Ctrl+Alt+P)"
 
+; ── Expansion state objects ──────────────────────────────────────────────────
+; recorder: tracks active slot name, playback speed, loop mode
+recorder             := {}
+recorder.slotName    := ""
+recorder.speed       := 1.0
+recorder.loopMode    := "infinite"  ; "infinite" | "fixed" | "untilkey"
+recorder.loopUntilKey := ""
+
+; activeProfile: current per-game profile settings
+activeProfile              := {}
+activeProfile.name         := "Default"
+activeProfile.sendMode     := "Input"
+activeProfile.vJoyDeviceId := 1
+activeProfile.vJoyPovMode  := ""
+activeProfileName          := "Default"
+
+; sequence: multi-step sequencer state
+sequence           := {}
+sequence.steps     := []
+sequence.stepIndex := 0
+sequence.playing   := false
+sequencePlaying    := false   ; thin alias for #If
+
+; Debug toggle (Ctrl+Alt+D)
+debugEnabled := false
+
+; GUI state
+macroGuiVisible := false
+macroGuiCreated := false
+; ─────────────────────────────────────────────────────────────────────────────
+
 ; Initialize XInput at startup
 EnsureXInputReady()
+
+; Initialize profiles (.ini auto-created if missing)
+DetectActiveProfile()
+
+; Initialize tray icon and right-click menu
+TrayMenuInit()
+
+; Build GUI panel (hidden at startup)
+MacroGuiCreate()
+SetTimer, MacroGuiStatusTick, 250
+
+; First-run welcome tip (shown when macros.ini doesn't exist yet)
+if (!FileExist(A_ScriptDir "\macros.ini"))
+{
+    tipX := A_ScreenWidth - 320
+    tipY := A_ScreenHeight - 100
+    ToolTip, Macros-Script ready! | Right-click tray for macros | or Ctrl+Shift+Alt+Z for menu, %tipX%, %tipY%
+    SetTimer, HideStartupTip, -5000
+}
 
 SetTimer, ControllerComboPoll, % controllerComboPollMs
 SetTimer, ControllerInputBoxHelper, 100  ; Monitor for InputBoxes and allow A button to confirm
@@ -104,23 +159,35 @@ OnExit("CleanupTimers")
 
 return
 
+; TrayMenu and MacroGui #Includes must be AFTER auto-execute return -- they contain
+; bare labels that would terminate the auto-execute section if placed at the top.
+#Include <TrayMenu>
+#Include <MacroGui>
+
+HideStartupTip:
+    ToolTip
+return
+
 ^!p::
     ToggleSendMode()
 return
 
-; Ctrl+Shift+Alt+Z shows a temporary menu for staged actions.
+; Ctrl+Alt+D -- toggle debug mode (shows diagnostic tooltips)
+^!d::
+    ToggleDebugHotkey()
+return
+
+ToggleDebugHotkey()
+{
+    global debugEnabled
+    debugEnabled := !debugEnabled
+    TrayMenuRebuild()
+    ShowMacroToggledTip("Macros: Debug mode " (debugEnabled ? "ON" : "OFF"), 2000, false)
+}
+
+; Ctrl+Shift+Alt+Z toggles the GUI panel (replaces old tooltip menu)
 $^+!z::
-    if (menuActive)
-        return
-    DeactivateClickMacro(true)
-    DeactivateHoldMacro(true)
-    DeactivatePureHold(true)
-    DeactivateAutoclicker(true)
-    StopRecorder(true)
-    ClearMacroTips()
-    menuActive := true
-    ToolTip, % MenuTooltipText()
-    SetTimer, MenuTimeout, -15000
+    MacroGuiToggle()
 return
 
 #If (menuActive)
@@ -203,18 +270,172 @@ F12::ToggleRecorderPlayback()
 Esc::ClearRecorder()
 #If
 
+#If (sequencePlaying)
+Esc::
+    SequenceStop()
+return
+#If
+
 ToggleRecorderPlayback()
 {
-    global recorderPlaying
+    global recorderPlaying, recorder
     if (recorderPlaying)
         StopPlayback()
     else
-        StartPlayback("prompt")
+    {
+        ; Use recorder.loopMode to determine how to start playback
+        loopMode := IsObject(recorder) ? recorder.loopMode : "infinite"
+        if (loopMode = "fixed")
+            StartPlayback("prompt")   ; Existing prompt-for-count behavior
+        else if (loopMode = "untilkey")
+            StartPlaybackUntilKey()
+        else
+            StartPlayback(-1)         ; Infinite
+    }
+}
+
+LoadRecorderSlot(slotName)
+{
+    global recorderEvents, recorder
+    global recorderMouseCoordSpace, recorderTargetHwnd, recorderTargetExe, recorderTargetClientW, recorderTargetClientH
+    global recorderHasControllerEvents
+
+    events := SlotLoad(slotName)
+    if (!IsObject(events) || events.MaxIndex() = "")
+        return false
+
+    metadata := SlotLoadMetadata(slotName, events)
+    recorderEvents := events
+    recorder.slotName := slotName
+    recorderMouseCoordSpace := metadata.coordMode
+    recorderTargetHwnd := 0
+    recorderTargetExe := metadata.targetExe
+    recorderTargetClientW := metadata.targetClientW
+    recorderTargetClientH := metadata.targetClientH
+    recorderHasControllerEvents := metadata.hasControllerEvents ? true : false
+    return true
+}
+
+PlayRecordedEvent(evt, playbackMeta, ByRef errorMessage)
+{
+    global recorderMouseCoordSpace, recorderTargetExe
+
+    errorMessage := ""
+    if (!IsObject(evt))
+        return true
+
+    coordSpace := (IsObject(playbackMeta) && playbackMeta.coordMode != "") ? playbackMeta.coordMode : recorderMouseCoordSpace
+    targetExe := (IsObject(playbackMeta) && playbackMeta.targetExe != "") ? playbackMeta.targetExe : recorderTargetExe
+
+    if (evt.type = "key")
+    {
+        SendEventOrInput("{" evt.code " " evt.state "}")
+    }
+    else if (evt.type = "mousebtn")
+    {
+        if (evt.state != "")
+            SendEventOrInput("{" evt.code " " evt.state "}")
+        else
+            SendEventOrInput("{" evt.code "}")
+    }
+    else if (evt.type = "mousemove")
+    {
+        CoordMode, Mouse, Screen
+        if (coordSpace = "client")
+        {
+            WinGet, activeExe, ProcessName, A
+            if (activeExe = "" || activeExe != targetExe)
+            {
+                errorMessage := "Playback stopped (focus lost: " targetExe ")"
+                return false
+            }
+            hwnd := WinExist("A")
+            if (!hwnd || !Recorder_ClientToScreen(hwnd, evt.x, evt.y, sx, sy))
+            {
+                errorMessage := "Playback stopped (client coords conversion failed)"
+                return false
+            }
+            MouseMove, %sx%, %sy%, 0
+        }
+        else
+        {
+            MouseMove, % evt.x, % evt.y, 0
+        }
+    }
+    else if (evt.type = "controller")
+    {
+        ControllerApplyStateToVJoy(evt.state)
+    }
+    return true
 }
 
 MenuTimeout:
     CloseMenu("timeout")
 return
+
+; ── Sequence step player ────────────────────────────────────────────────────
+; Called by SetTimer from SequenceStart(). Plays one slot's events inline,
+; then schedules the next step (or stops when all steps complete).
+SequencePlayStep:
+    global sequence, sequencePlaying, recorder, debugEnabled
+    if (!sequence.playing || !IsObject(sequence.steps))
+    {
+        SequenceStop()
+        return
+    }
+    stepIdx    := sequence.stepIndex
+    totalSteps := sequence.steps.MaxIndex()
+    if (stepIdx > totalSteps || stepIdx = "")
+    {
+        SequenceStop()
+        ShowMacroToggledTip("Sequence complete", 2000, false)
+        return
+    }
+    step     := sequence.steps[stepIdx]
+    slotName := step.slotName
+    ShowMacroToggledTip("Sequence step " stepIdx " of " totalSteps ": '" slotName "' | Esc to stop", 0, false)
+
+    events := SlotLoad(slotName)
+    if (!IsObject(events) || events.MaxIndex() = "")
+    {
+        if (debugEnabled)
+            ShowMacroToggledTip("DEBUG: Skipping empty step " stepIdx ": '" slotName "'", 1500, false)
+        sequence.stepIndex := stepIdx + 1
+        SetTimer, SequencePlayStep, -10
+        return
+    }
+    stepMeta := SlotLoadMetadata(slotName, events)
+
+    ; Play events inline (single-threaded -- Sleep yields to hotkey threads for Esc)
+    speedFactor := (IsObject(recorder) && recorder.speed > 0) ? recorder.speed : 1.0
+    CoordMode, Mouse, Screen
+    for _, evt in events
+    {
+        if (!sequence.playing)
+            break
+        scaledDelay := Round(evt.delay / speedFactor)
+        if (scaledDelay > 0)
+            Sleep, %scaledDelay%
+        if (!sequence.playing)
+            break
+        if (!PlayRecordedEvent(evt, stepMeta, playbackError))
+        {
+            SequenceStop()
+            ShowMacroToggledTip(playbackError, 3000, false)
+            return
+        }
+    }
+
+    if (sequence.playing)
+    {
+        sequence.stepIndex := stepIdx + 1
+        delayAfter := step.delayAfter
+        if (delayAfter > 0)
+            Sleep, %delayAfter%
+        SetTimer, SequencePlayStep, -1
+    }
+return
+; ─────────────────────────────────────────────────────────────────────────────
 
 AutoStartControllerPlayback:
     ; Auto-start looping playback after controller recording stops
@@ -253,6 +474,12 @@ CleanupTimers(exitReason, exitCode)
 {
     SetTimer, ControllerComboPoll, Off
     SetTimer, ControllerInputBoxHelper, Off
+    SetTimer, MacroGuiStatusTick, Off
+    SetTimer, RecorderSampleMouse, Off
+    SetTimer, RecorderSampleController, Off
+    SetTimer, HoldMacroControllerPoll, Off
+    SetTimer, PureHoldControllerPoll, Off
+    SetTimer, PlaybackLoopPromptCountdownTick, Off
 }
 
 
@@ -383,6 +610,22 @@ ControllerInputBoxHelper:
         dialogHwnd := WinExist()
     else if (WinExist("Playback Loops ahk_class #32770"))
         dialogHwnd := WinExist()
+    else if (WinExist("Save Recording ahk_class #32770"))
+        dialogHwnd := WinExist()
+    else if (WinExist("Loop Until Key ahk_class #32770"))
+        dialogHwnd := WinExist()
+    else if (WinExist("New Profile ahk_class #32770"))
+        dialogHwnd := WinExist()
+    else if (WinExist("Game Process ahk_class #32770"))
+        dialogHwnd := WinExist()
+    else if (WinExist("Slot Conflict ahk_class #32770"))
+        dialogHwnd := WinExist()
+    else if (WinExist("Build Sequence - Step ahk_class #32770"))
+        dialogHwnd := WinExist()
+    else if (WinExist("Save Sequence ahk_class #32770"))
+        dialogHwnd := WinExist()
+    else if (WinExist("Step ahk_class #32770"))
+        dialogHwnd := WinExist()
 
     if (dialogHwnd)
     {
@@ -436,7 +679,9 @@ ShowMacroToggledTip(text := "Macro Toggled", durationMs := 3000, earlyHide := tr
     macroTipVisible := true
     macroTipEarlyHide := earlyHide
     macroTipIdleBaseline := earlyHide ? (A_TimeIdlePhysical + 1) : 0
-    ToolTip, %text%
+    tipX := A_ScreenWidth - 320
+    tipY := A_ScreenHeight - 100
+    ToolTip, %text%, %tipX%, %tipY%
     SetTimer, HideMacroTipTimeout, % -durationMs
     if (earlyHide)
         SetTimer, HideMacroTipOnInput, 50
@@ -483,9 +728,11 @@ ShowHotkeyHelp()
     text := "Macros Script Hotkeys`n"
         . "======================`n"
         . "Ctrl+Shift+Alt+Z - Open macro menu`n"
-        . "Ctrl+Alt+P - Toggle SendMode (" sendMode ")`n"
+        . "Ctrl+Alt+P - Cycle SendMode (" sendMode ") Input->Play->Event`n"
+        . "Ctrl+Alt+D - Toggle debug mode`n"
         . "Ctrl+Esc - Reload script`n"
         . "Ctrl+Alt+T - Show this help`n"
+        . "Right-click tray icon - Full menu (slots, profiles, sequences)`n"
         . "`n"
         . "Menu Options (F1-F6):`n"
         . "F1 - F12 => Left click`n"
@@ -519,9 +766,13 @@ return
 
 MenuTooltipText()
 {
-    global sendMode
+    global sendMode, activeProfileName, recorder
     ctrlSupport := ControllerSupportAvailable()
-    text := "F1 - Stage left click with F12 key`n"
+    ; Status header
+    slotDisplay := (IsObject(recorder) && recorder.slotName != "") ? recorder.slotName : "(none)"
+    text := "Slot: " slotDisplay " | Profile: " activeProfileName " | SendMode: " sendMode "`n"
+        . "--------------------------------`n"
+        . "F1 - Stage left click with F12 key`n"
         . "F2 - Stage Autoclicker (F12 toggles)`n"
         . "F3 - Stage turbo keyhold`n"
         . "F4 - Stage pure key hold`n"
@@ -1024,6 +1275,7 @@ StartRecorder(mode := "combined", suppressCombo := false, mouseCoordSpace := "sc
     else
         SetTimer, RecorderSampleMouse, Off
     SetTimer, RecorderSampleController, % recorderControllerSampleMs
+    TrayIconSet("recording")
     if (mode = "controller")
         ShowMacroToggledTip("Recording controller... (L1+L2+R1+R2+A to stop)", 3000, true)
     else if (recorderMouseCoordSpace = "client")
@@ -1085,6 +1337,7 @@ StartPlayback(loopMode := "prompt")
     recorderLoopTarget := loopTarget
     recorderLoopCurrent := 1
     loopLabel := (recorderLoopTarget > 0) ? (recorderLoopTarget " loops") : "infinite loops"
+    TrayIconSet("playing")
     if (recorderMouseCoordSpace = "client")
         ShowMacroToggledTip("Playing macro (client-locked: " recorderTargetExe ", " loopLabel ") - F12 to stop")
     else
@@ -1188,9 +1441,45 @@ StopPlayback(silent := false)
     recorderLoopCurrent := 1
     if (recorderHasControllerEvents)
         ControllerResetVJoyState()
+    TrayIconSet("idle")
     if (!silent)
         ShowMacroToggledTip("Macro Toggled Off")
 }
+
+; Start infinite playback that stops when the user's configured stop key is pressed.
+; The stop key is defined in recorder.loopUntilKey.
+StartPlaybackUntilKey()
+{
+    global recorderPlaying, recorder
+    if (recorderPlaying)
+        return
+    stopKey := IsObject(recorder) ? recorder.loopUntilKey : ""
+    if (stopKey = "")
+    {
+        ; Prompt if no stop key configured
+        ShowMacroToggledTip("No stop key set -- right-click tray > Loop Mode > Until Key first", 3000, false)
+        return
+    }
+    ; Start infinite playback
+    StartPlayback(-1)
+    ; Register a one-shot hotkey for the stop key
+    try
+    {
+        Hotkey, ~*%stopKey%, PlaybackUntilKeyStop, On
+    }
+    ShowMacroToggledTip("Looping until '" stopKey "' pressed | Esc also stops", 3000, false)
+}
+
+PlaybackUntilKeyStop:
+    global recorder
+    stopKey := IsObject(recorder) ? recorder.loopUntilKey : ""
+    StopPlayback()
+    if (stopKey != "")
+    {
+        try
+            Hotkey, ~*%stopKey%, PlaybackUntilKeyStop, Off
+    }
+return
 
 TogglePlaybackPause()
 {
@@ -1200,12 +1489,14 @@ TogglePlaybackPause()
     if (recorderPaused)
     {
         recorderPaused := false
+        TrayIconSet("playing")
         ShowMacroToggledTip("Playback resumed", 1000, false)
         SetTimer, RecorderPlayNext, -1
     }
     else
     {
         recorderPaused := true
+        TrayIconSet("paused")
         ShowMacroToggledTip("Playback paused", 1000, false)
     }
 }
@@ -1242,12 +1533,14 @@ ClearRecorder()
 
 RecorderPlayNext:
     global recorderEvents, recorderPlaying, recorderPaused, recorderPlayIndex
-    global recorderLoopTarget, recorderLoopCurrent
+    global recorderLoopTarget, recorderLoopCurrent, recorder
     if (!recorderPlaying)
         return
     maxIndex := recorderEvents.MaxIndex()
     if (maxIndex = "")
         return
+    ; Speed multiplier: 2x speed = half the delay time, 0.5x = double
+    speedFactor := (IsObject(recorder) && recorder.speed > 0) ? recorder.speed : 1.0
     idx := recorderPlayIndex
     while (idx <= maxIndex)
     {
@@ -1259,53 +1552,20 @@ RecorderPlayNext:
             return
         }
         evt := recorderEvents[idx]
-        Sleep, % evt.delay
+        scaledDelay := Round(evt.delay / speedFactor)
+        if (scaledDelay < 0)
+            scaledDelay := 0
+        Sleep, %scaledDelay%
         if (recorderPaused)
         {
             recorderPlayIndex := idx
             return
         }
-        if (evt.type = "key")
+        if (!PlayRecordedEvent(evt, "", playbackError))
         {
-            SendEventOrInput("{" evt.code " " evt.state "}")
-        }
-        else if (evt.type = "mousebtn")
-        {
-            if (evt.state != "")
-                SendEventOrInput("{" evt.code " " evt.state "}")
-            else
-                SendEventOrInput("{" evt.code "}")
-        }
-        else if (evt.type = "mousemove")
-        {
-            ; Ensure screen coordinates for MouseMove regardless of global CoordMode
-            CoordMode, Mouse, Screen
-            if (recorderMouseCoordSpace = "client")
-            {
-                WinGet, activeExe, ProcessName, A
-                if (activeExe = "" || activeExe != recorderTargetExe)
-                {
-                    StopPlayback(true)
-                    ShowMacroToggledTip("Playback stopped (focus lost: " recorderTargetExe ")", 3000, false)
-                    return
-                }
-                hwnd := WinExist("A")
-                if (!hwnd || !Recorder_ClientToScreen(hwnd, evt.x, evt.y, sx, sy))
-                {
-                    StopPlayback(true)
-                    ShowMacroToggledTip("Playback stopped (client coords conversion failed)", 3000, false)
-                    return
-                }
-                MouseMove, %sx%, %sy%, 0
-            }
-            else
-            {
-                MouseMove, % evt.x, % evt.y, 0
-            }
-        }
-        else if (evt.type = "controller")
-        {
-            ControllerApplyStateToVJoy(evt.state)
+            StopPlayback(true)
+            ShowMacroToggledTip(playbackError, 3000, false)
+            return
         }
         idx++
     }
@@ -1335,6 +1595,8 @@ SendEventOrInput(seq)
     modeToUse := recorderSendMode != "" ? recorderSendMode : sendMode
     if (modeToUse = "Play")
         SendPlay, %seq%
+    else if (modeToUse = "Event")
+        SendEvent, %seq%
     else
         SendInput, %seq%
 }
@@ -1349,10 +1611,16 @@ ToggleSendMode()
     }
     if (sendMode = "Input")
         sendMode := "Play"
+    else if (sendMode = "Play")
+        sendMode := "Event"
     else
         sendMode := "Input"
     ApplySendMode()
-    ShowMacroToggledTip("SendMode: " sendMode)
+    ; Sync profile sendMode field
+    if (IsObject(activeProfile))
+        activeProfile.sendMode := sendMode
+    TrayMenuRebuild()
+    ShowMacroToggledTip("SendMode: " sendMode " (Ctrl+Alt+P to cycle)", 2000, false)
     if (menuActive)
         ToolTip, % MenuTooltipText()
 }
@@ -1456,20 +1724,29 @@ FinalizeRecording()
         totalCount := 0
 
     ; Build informative message
+    TrayIconSet("idle")
+
     if (totalCount = 0)
-        tipText := "Recording stopped - no events captured"
-    else
     {
-        tipText := "Recorded " totalCount " events"
-        if (mouseCount > 0)
-            tipText .= " (mouse:" mouseCount ")"
-        if (keyCount > 0)
-            tipText .= " (keys:" keyCount ")"
-        if (ctrlCount > 0)
-            tipText .= " (ctrl:" ctrlCount ")"
-        tipText .= " - F12 plays"
+        ShowMacroToggledTip("Recording stopped - no events captured", 3000, false)
+        return
     }
-    ShowMacroToggledTip(tipText)
+
+    ; Prompt user to name and save the slot
+    defaultName := IsObject(recorder) && recorder.slotName != "" ? recorder.slotName : "untitled"
+    InputBox, slotName, Save Recording, Name this recording:, , 300, 120, , , , 30000, %defaultName%
+    if (ErrorLevel)  ; Cancel pressed -- keep events in memory but don't save
+    {
+        tipText := "Recorded " totalCount " events (not saved) -- F12 to play"
+        ShowMacroToggledTip(tipText, 3000, false)
+        return
+    }
+    slotName := Trim(slotName)
+    if (slotName = "")
+        slotName := "untitled"
+    if (IsObject(recorder))
+        recorder.slotName := slotName
+    SlotSave(slotName, recorderEvents, recorderMouseCoordSpace)
 }
 
 RecorderAddEvent(type, code := "", state := "", x := "", y := "", payload := "")
