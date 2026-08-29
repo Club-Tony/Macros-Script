@@ -1,4 +1,4 @@
-# Build artifacts
+﻿# Build artifacts
 MacrosEngine/build/
 MacrosEngine/build-*/
 MacrosApp/**/bin/
@@ -16,3 +16,6 @@ macros.ini.bak
 # planning repository. This repo is PUBLIC -- plan and handoff files must
 # never be committed here.
 Plans/
+
+# Machine-local KiroCrew/Kiro CLI state
+.kiro/
