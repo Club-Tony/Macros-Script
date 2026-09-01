@@ -45,9 +45,10 @@ public sealed class BindingSettingsForm : Form
             AutoScroll = true,
             Padding = new Padding(12),
             ColumnCount = 8,
-            RowCount = Enum.GetValues<MacroAction>().Length + 1,
+            RowCount = Enum.GetValues<MacroAction>().Length + 2,
             BackColor = Color.FromArgb(24, 24, 28)
         };
+        _rows.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
         _rows.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 125));
         _rows.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         _rows.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 82));
@@ -60,6 +61,7 @@ public sealed class BindingSettingsForm : Form
         int row = 1;
         foreach (MacroAction action in Enum.GetValues<MacroAction>())
             AddBindingRow(action, row++);
+        _rows.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
         var bottom = new FlowLayoutPanel
         {

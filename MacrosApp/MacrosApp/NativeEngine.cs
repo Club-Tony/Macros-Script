@@ -36,11 +36,15 @@ public static class NativeEngine
     private const string DllName = "MacrosEngine.dll";
     // We only need a temporary native buffer large enough for the engine to parse and copy.
     private const int MaxNativeMacroEventBytes = 64;
+    public const uint ExpectedAbiVersion = 0x00020000;
+    public const uint RequiredCapabilities = 0x00000001 | 0x00000002 | 0x00000004;
     private const uint ControllerOutputVJoy = 0;
     private const uint ControllerOutputCallback = 1;
 
     private static bool _available;
     private static bool _checked;
+    private static string _availabilityMessage = "Native engine has not been checked.";
+    private static string _version = "unavailable";
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     [return: MarshalAs(UnmanagedType.I1)]
@@ -62,21 +66,47 @@ public static class NativeEngine
                 _checked = true;
                 try
                 {
-                    var version = Marshal.PtrToStringAnsi(Engine_GetVersion());
-                    _available = version != null;
+                    _version = Marshal.PtrToStringAnsi(Engine_GetVersion()) ?? "unknown";
+                    var abi = Engine_GetAbiVersion();
+                    var capabilities = Engine_GetCapabilities();
+                    _available = IsCompatibleBuild(abi, capabilities);
+                    _availabilityMessage = _available
+                        ? $"{_version}; ABI 0x{abi:X8}"
+                        : $"Controller unavailable: expected native ABI 0x{ExpectedAbiVersion:X8} with capabilities 0x{RequiredCapabilities:X8}, got ABI 0x{abi:X8} and capabilities 0x{capabilities:X8}. Rebuild MacrosApp.";
                 }
                 catch (DllNotFoundException)
                 {
                     _available = false;
+                    _availabilityMessage = "Controller unavailable: MacrosEngine.dll was not found. Rebuild MacrosApp.";
                 }
                 catch (EntryPointNotFoundException)
                 {
                     _available = false;
+                    _availabilityMessage = "Controller unavailable: MacrosEngine.dll is stale and lacks build identity exports. Rebuild MacrosApp.";
+                }
+                catch (BadImageFormatException)
+                {
+                    _available = false;
+                    _availabilityMessage = "Controller unavailable: MacrosEngine.dll architecture does not match MacrosApp.";
                 }
             }
             return _available;
         }
     }
+
+    public static string AvailabilityMessage
+    {
+        get { _ = IsAvailable; return _availabilityMessage; }
+    }
+
+    public static string Version
+    {
+        get { _ = IsAvailable; return _version; }
+    }
+
+    public static bool IsCompatibleBuild(uint abiVersion, uint capabilities) =>
+        abiVersion == ExpectedAbiVersion &&
+        (capabilities & RequiredCapabilities) == RequiredCapabilities;
 
     // ================================================================
     // Engine lifecycle
@@ -121,6 +151,10 @@ public static class NativeEngine
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     [return: MarshalAs(UnmanagedType.I1)]
     public static extern bool Engine_IsRecordingController();
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static extern bool Engine_TestFeedControllerSnapshot(ref ControllerState state);
 
     // ================================================================
     // Recording
@@ -230,6 +264,12 @@ public static class NativeEngine
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     public static extern IntPtr Engine_GetVersion();
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Engine_GetAbiVersion();
+
+    [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+    public static extern uint Engine_GetCapabilities();
 
     // ================================================================
     // Safe wrappers that check availability first
@@ -400,6 +440,14 @@ public static class NativeEngine
         if (!IsAvailable) return false;
         state.Connected = true;
         try { return Engine_RecordControllerEvent(ref state); }
+        catch { return false; }
+    }
+
+    public static bool TryFeedControllerSnapshotForTest(ControllerState state)
+    {
+        if (!IsAvailable) return false;
+        state.Connected = true;
+        try { return Engine_TestFeedControllerSnapshot(ref state); }
         catch { return false; }
     }
 

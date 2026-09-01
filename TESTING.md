@@ -1,6 +1,6 @@
 # TESTING.md - Macros-Script validation
 
-`MacrosApp` plus `MacrosEngine` is the primary validation target. The frozen AHK v1 worktree is a fallback compatibility gate, and the AHK v2 checks below are archival regression checks rather than the active product roadmap.
+`MacrosApp` plus `MacrosEngine` is the primary validation target. The vendored frozen AHK v1 runtime is a fallback compatibility gate, and the AHK v2 checks below are archival regression checks rather than the active product roadmap.
 
 ## Automated gate
 
@@ -11,7 +11,7 @@ python tests\live\run_live_tests.py macros
 python tests\live\run_live_tests.py macros --fixture visual
 ```
 
-The normal gate covers the native engine, .NET builds, settings migration and atomic round-trips, binding defaults/resets/collisions, keyboard and controller chord latching, trigger thresholds, disconnect/reconnect behavior, tray-first hidden startup, the current-user control channel, graceful shutdown, palette focus preservation, hands-free recorder autosave, and VirtualXbox playback when that backend is present. The explicit visual fixture covers onboarding, binding settings, and the compact HUD idle/recording/playback/error states. Update baselines only with `--update-baselines` and inspect them before acceptance.
+The normal gate covers native build identity/capabilities, the real controller snapshot recorder path, .NET builds, controller Cancel migration, strict per-profile backend selection, controller-start failure, zero-controller partial-save warnings, controller-event metadata, tray-first startup, graceful shutdown, HUD focus preservation, and hands-free autosave. Both managed runners use isolated output directories so a live MacrosApp cannot lock their build products. The explicit visual fixture captures the actually shown HUD window and rejects uniform grey/blank output across idle, recording, saved-actions, playback, missing-controller, backend-error, and chord-animation states. Update baselines only with `--update-baselines` and inspect them before acceptance.
 
 ## Supervised game matrix
 
@@ -21,22 +21,22 @@ Run this only with a person present; never schedule it during gameplay.
 |---|---|---|---|---|
 | Windowed | Required | Required | Required | Required |
 | Borderless | Required | Required | Required | Required |
-| Exclusive fullscreen | Required | Required | Required | Layered HUD may still be invisible until the deferred Vulkan layer ships |
+| Exclusive fullscreen | Required | Required | Required | Painted HUD may still be invisible until the deferred Vulkan layer ships |
 
-Confirm the HUD appears on the monitor of the focused game window, not only the primary display. Confirm stop-record auto-saves (`recording-...`) with a HUD toast and never opens a mouse save dialog.
+For RAC1 in both windowed and borderless modes, start and stop recording entirely by controller; confirm the saved event file contains changing `C|` rows and a nonzero controller count; invoke immediate playback from the saved-actions HUD; confirm the remembered backend moves the game; and confirm Cancel stops playback and returns virtual controls to neutral. Also confirm no focus loss, full-window popup, mouse requirement, or blank HUD. Exclusive-fullscreen Vulkan injection remains out of scope.
 
 Also verify that elevated or anti-cheat-protected games may ignore `SendInput`; this is a documented platform limitation, not a bypass target.
 
 ## Frozen legacy validation
 
-- Detached worktree HEAD is exactly `05226d8e50eb619bf4ce394f732536aa0cb7e9d7`.
-- `Macros.ahk` blob is exactly `a2d6db61b6fd5d503bac37f2463e72507fb2fe16`.
+- `legacy\frozen-05226d8\manifest.json` declares immutable source commit `05226d8e50eb619bf4ce394f732536aa0cb7e9d7`.
+- Every vendored runtime file matches its manifest SHA-256, Git blob, and byte length; `Macros.ahk` remains blob `a2d6db61b6fd5d503bac37f2463e72507fb2fe16`.
 - `Launch-LegacyMacros.ps1 -ValidateOnly` resolves AutoHotkey v1.1.37.02.
 - `Install-LegacyDesktopShortcut.ps1 -ValidateOnly` reports the exact launcher target without writing Desktop.
 - A failed graceful runtime switch cancels launch and never force-kills.
 - Starting MacrosApp while a Macros AHK runtime is active offers a graceful switch; choosing No leaves AHK as the sole runtime, and a failed five-second shutdown cancels native startup.
 - `tools\legacy\fixtures\GracefulShutdownProbe.ahk` confirms the hidden-window Exit command runs AHK `OnExit` cleanup before process exit.
-- Change the active branch in the primary worktree and confirm the shortcut still resolves the detached legacy path.
+- Confirm the Desktop shortcut launcher is under `tools\legacy` and its working directory is `legacy\frozen-05226d8`.
 
 ---
 

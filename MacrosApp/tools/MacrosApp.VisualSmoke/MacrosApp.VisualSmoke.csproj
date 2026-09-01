@@ -5,8 +5,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
+    <BaseOutputPath>bin\visual-isolated\runner\</BaseOutputPath>
+    <IsolatedAppOutputPath>$(MSBuildThisFileDirectory)bin\visual-isolated\app\</IsolatedAppOutputPath>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\MacrosApp\MacrosApp.csproj" />
+    <ProjectReference Include="..\..\MacrosApp\MacrosApp.csproj"
+                      AdditionalProperties="BaseOutputPath=$(IsolatedAppOutputPath)" />
   </ItemGroup>
 </Project>

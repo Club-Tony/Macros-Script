@@ -8,6 +8,8 @@ public class GameProfile
     public int VJoyDeviceId { get; set; } = 1;
     public string VJoyPovMode { get; set; } = string.Empty;
     public ControllerOutputType ControllerOutput { get; set; } = ControllerOutputType.VJoy;
+    public bool HasControllerOutputSelection { get; set; }
+    public bool ControllerOutputVerified { get; set; }
 
     public override string ToString() => string.IsNullOrEmpty(ProcessName)
         ? Name

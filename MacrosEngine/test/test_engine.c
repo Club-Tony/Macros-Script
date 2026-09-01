@@ -113,6 +113,41 @@ static void test_recording(void)
           "Controller event button state preserved");
 }
 
+static void test_controller_snapshot_recording_path(void)
+{
+    printf("\n[controller snapshot recording path]\n");
+    ControllerState pad;
+    memset(&pad, 0, sizeof(pad));
+    pad.connected = true;
+
+    CHECK(Engine_GetAbiVersion() == MACROS_ENGINE_ABI_VERSION,
+          "Native ABI identifier matches header");
+    CHECK((Engine_GetCapabilities() & MACROS_ENGINE_CAP_CONTROLLER_RECORDING) != 0,
+          "Controller recording capability is reported");
+    CHECK(Engine_StartRecording(), "Snapshot-path recording starts");
+    SetEnvironmentVariableA("MACROS_TEST_CONTROLLER_FEED", "1");
+    CHECK(Engine_StartControllerRecording(), "Controller recorder starts");
+
+    pad.buttons = XINPUT_GAMEPAD_A;
+    CHECK(!Engine_TestFeedControllerSnapshot(&pad),
+          "Held start chord/input is ignored until neutral release");
+    pad.buttons = 0;
+    CHECK(!Engine_TestFeedControllerSnapshot(&pad),
+          "Neutral release arms recording without adding an event");
+    pad.buttons = XINPUT_GAMEPAD_A;
+    CHECK(Engine_TestFeedControllerSnapshot(&pad),
+          "Controller transition records through poller path");
+    pad.buttons = 0;
+    CHECK(Engine_TestFeedControllerSnapshot(&pad),
+          "Neutral release transition is recorded");
+
+    Engine_StopControllerRecording();
+    SetEnvironmentVariableA("MACROS_TEST_CONTROLLER_FEED", NULL);
+    Engine_StopRecording();
+    CHECK(Engine_GetRecordedEventCount() == 2,
+          "Snapshot path reports two controller events");
+}
+
 static void test_file_io(void)
 {
     printf("\n[file I/O]\n");
@@ -504,6 +539,7 @@ int main(void)
 
     test_lifecycle();
     test_recording();
+    test_controller_snapshot_recording_path();
     test_file_io();
     test_controller();
     test_playback_api();

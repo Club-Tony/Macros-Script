@@ -6,13 +6,16 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
+    <BaseOutputPath>bin\smoke-isolated\runner\</BaseOutputPath>
+    <IsolatedAppOutputPath>$(MSBuildThisFileDirectory)bin\smoke-isolated\app\</IsolatedAppOutputPath>
     <MacrosEngineDllPath Condition="Exists('..\..\..\MacrosEngine\build-x64\MacrosEngine.dll')">..\..\..\MacrosEngine\build-x64\MacrosEngine.dll</MacrosEngineDllPath>
     <MacrosEngineDllPath Condition="'$(MacrosEngineDllPath)' == '' and Exists('..\..\..\MacrosEngine\build\MacrosEngine.dll')">..\..\..\MacrosEngine\build\MacrosEngine.dll</MacrosEngineDllPath>
     <MacrosEngineDllPath Condition="'$(MacrosEngineDllPath)' == '' and Exists('..\..\..\MacrosEngine\build\libMacrosEngine.dll')">..\..\..\MacrosEngine\build\libMacrosEngine.dll</MacrosEngineDllPath>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\MacrosApp\MacrosApp.csproj" />
+    <ProjectReference Include="..\..\MacrosApp\MacrosApp.csproj"
+                      AdditionalProperties="BaseOutputPath=$(IsolatedAppOutputPath)" />
   </ItemGroup>
 
   <Target Name="CopyMacrosEngine" AfterTargets="Build" Condition="'$(MacrosEngineDllPath)' != ''">

@@ -39,6 +39,8 @@ public class SlotManager
             {
                 if (data.TryGetValue("event_count", out var ec) && int.TryParse(ec, out int eventCount))
                     slot.EventCount = eventCount;
+                if (data.TryGetValue("controller_event_count", out var cc) && int.TryParse(cc, out int controllerCount))
+                    slot.ControllerEventCount = controllerCount;
                 if (data.TryGetValue("coord_mode", out var cm))
                     slot.CoordMode = cm;
                 if (data.TryGetValue("recorded", out var rec))
@@ -47,6 +49,8 @@ public class SlotManager
 
             // Calculate duration from event file
             slot.Duration = CalculateDuration(name);
+            if (slot.ControllerEventCount == 0)
+                slot.ControllerEventCount = CountControllerEvents(GetEventFilePath(name));
 
             slots.Add(slot);
         }
@@ -148,6 +152,23 @@ public class SlotManager
     public string NormalizeSlotName(string name)
     {
         return SanitizeSlotName(name);
+    }
+
+    public static int CountControllerEvents(string eventPath)
+    {
+        try
+        {
+            return File.ReadLines(eventPath).Count(line =>
+                line.TrimStart().StartsWith("C|", StringComparison.Ordinal));
+        }
+        catch (IOException)
+        {
+            return 0;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return 0;
+        }
     }
 
     public string AllocateRecordingName(DateTime timestamp)
@@ -255,6 +276,8 @@ public class SlotManager
                 ? new Dictionary<string, string>(existingSection, StringComparer.OrdinalIgnoreCase)
                 : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             slotSection["event_count"] = slot.EventCount.ToString();
+            slotSection["controller_event_count"] = slot.ControllerEventCount.ToString();
+            slotSection["has_controller"] = (slot.ControllerEventCount > 0).ToString().ToLowerInvariant();
             slotSection["coord_mode"] = slot.CoordMode;
             slotSection["recorded"] = slot.Recorded;
 

@@ -80,18 +80,23 @@ public sealed class MacrosApplicationContext : ApplicationContext
         _mainForm.Hide();
     }
 
-    private void DispatchAction(MacroAction action)
+    private void DispatchAction(ActionTrigger trigger)
     {
-        if (action == MacroAction.Palette)
+        if (trigger.Action == MacroAction.Palette)
             _palette.TogglePalette();
         else
-            _mainForm.ExecuteAction(action);
+            _mainForm.ExecuteAction(trigger);
+        if (trigger.Action == MacroAction.Cancel && !_palette.ShouldStayVisible && !_palette.ShouldToast)
+        {
+            _palette.HidePalette();
+            return;
+        }
         _palette.RegisterActivity();
     }
 
     private void MainForm_StatusChanged(object? sender, MacroStatusChangedEventArgs e)
     {
-        _palette.UpdateStatus(e.State, e.Profile);
+        _palette.UpdateStatus(e.State, e.Profile, e.Presentation);
         if (_palette.ShouldStayVisible)
             _palette.ShowPalette(keepVisible: true);
         else if (_palette.ShouldToast)

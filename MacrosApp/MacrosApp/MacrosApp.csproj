@@ -7,14 +7,20 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <PlatformTarget>x64</PlatformTarget>
-    <MacrosEngineDllPath Condition="Exists('..\..\MacrosEngine\build-x64\MacrosEngine.dll')">..\..\MacrosEngine\build-x64\MacrosEngine.dll</MacrosEngineDllPath>
-    <MacrosEngineDllPath Condition="'$(MacrosEngineDllPath)' == '' and Exists('..\..\MacrosEngine\build\MacrosEngine.dll')">..\..\MacrosEngine\build\MacrosEngine.dll</MacrosEngineDllPath>
-    <MacrosEngineDllPath Condition="'$(MacrosEngineDllPath)' == '' and Exists('..\..\MacrosEngine\build\libMacrosEngine.dll')">..\..\MacrosEngine\build\libMacrosEngine.dll</MacrosEngineDllPath>
+    <MacrosEngineBuildScript>$(MSBuildProjectDirectory)\..\..\MacrosEngine\Build-Native.ps1</MacrosEngineBuildScript>
+    <MacrosEngineDllPath>$(MSBuildProjectDirectory)\..\..\MacrosEngine\build-x64\MacrosEngine.dll</MacrosEngineDllPath>
   </PropertyGroup>
 
-  <Target Name="CopyMacrosEngine" AfterTargets="Build" Condition="'$(MacrosEngineDllPath)' != ''">
+  <Target Name="BuildMacrosEngine" BeforeTargets="PrepareForBuild" Condition="'$(SkipMacrosNativeBuild)' != 'true'">
+    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(MacrosEngineBuildScript)&quot;" />
+  </Target>
+
+  <Target Name="CopyMacrosEngine" AfterTargets="Build">
+    <Error Condition="!Exists('$(MacrosEngineDllPath)')"
+           Text="Expected deterministic native build output was not found: $(MacrosEngineDllPath)" />
     <Copy SourceFiles="$(MacrosEngineDllPath)"
-          DestinationFiles="$(OutDir)MacrosEngine.dll" />
+          DestinationFiles="$(OutDir)MacrosEngine.dll"
+          SkipUnchangedFiles="true" />
   </Target>
 
   <ItemGroup>

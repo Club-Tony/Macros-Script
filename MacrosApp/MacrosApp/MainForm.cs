@@ -33,6 +33,9 @@ public partial class MainForm : Form
     private RecordingInputHook? _recordingInputHook;
     private DateTime _recordingIgnoreUntilUtc = DateTime.MinValue;
     private bool _recordingSawController;
+    private bool _recordingControllerExpected;
+    private bool _recordingControllerReady;
+    private string _recordingStartError = string.Empty;
     private IReadOnlyList<ControllerControl> _recorderChord = Array.Empty<ControllerControl>();
     private bool _hotkeysSuspended;
     private KeyboardToggleBinding? _holdKeyBinding;
@@ -51,6 +54,8 @@ public partial class MainForm : Form
     private System.Windows.Forms.Timer _statusOverlayTimer = null!;
     private int _statusOverlayFrame;
     private Color _statusOverlayBaseColor;
+    private GameProfile? _activeProfile;
+    private bool _loadingProfile;
 
     // Current macro state
     private MacroState _currentState = MacroState.Idle;
@@ -192,7 +197,17 @@ public partial class MainForm : Form
         cmbControllerOutput.SelectedIndexChanged += (_, _) =>
         {
             if (Enum.TryParse<ControllerOutputType>(cmbControllerOutput.SelectedItem?.ToString(), out var output))
+            {
                 _settings.ControllerOutput = output;
+                if (!_loadingProfile && _activeProfile != null)
+                {
+                    _activeProfile.ControllerOutput = output;
+                    _activeProfile.ControllerOutputVerified = false;
+                    _activeProfile.VJoyDeviceId = _settings.VJoyDeviceId;
+                    _activeProfile.HasControllerOutputSelection = true;
+                    _profileManager.SaveProfile(_activeProfile);
+                }
+            }
             ClearComboSelectionHighlight(cmbControllerOutput);
             ApplyVirtualXboxConnectionPreference(showStatus: false);
             SettingsChanged?.Invoke(this, EventArgs.Empty);
@@ -307,6 +322,7 @@ public partial class MainForm : Form
 
     private void LoadData()
     {
+        _loadingProfile = true;
         RefreshSlotList();
 
         // Load profiles and detect active
@@ -316,8 +332,15 @@ public partial class MainForm : Form
         profileStatusLabel.Text = $"Profile: {profileName}";
 
         var effectiveProfile = active ?? profiles.FirstOrDefault();
+        _activeProfile = effectiveProfile;
         if (effectiveProfile != null)
         {
+            if (!effectiveProfile.HasControllerOutputSelection)
+            {
+                effectiveProfile.ControllerOutput = _settings.ControllerOutput;
+                effectiveProfile.HasControllerOutputSelection = true;
+                _profileManager.SaveProfile(effectiveProfile);
+            }
             _settings.VJoyDeviceId = Math.Clamp(effectiveProfile.VJoyDeviceId, 1, 16);
             _settings.ControllerOutput = effectiveProfile.ControllerOutput;
             cmbControllerOutput.SelectedItem = effectiveProfile.ControllerOutput.ToString();
@@ -329,6 +352,7 @@ public partial class MainForm : Form
             _settings.SendMode = active.SendMode;
             cmbSendMode.SelectedItem = active.SendMode.ToString();
         }
+        _loadingProfile = false;
     }
 
     private void ApplySettingsToControls()
@@ -352,7 +376,7 @@ public partial class MainForm : Form
         {
             engineStatusLabel.Text = "Engine: not loaded";
             engineStatusLabel.ForeColor = Color.FromArgb(200, 130, 50);
-            controllerState.SetUnavailable("The native engine DLL is not available, so controller preview cannot start.");
+            controllerState.SetUnavailable(NativeEngine.AvailabilityMessage);
             SetControllerViewerUnavailable();
         }
     }
@@ -388,6 +412,7 @@ public partial class MainForm : Form
                 engineStatusLabel.ForeColor = ControllerUnavailableColor;
                 controllerState.SetUnavailable("The native engine initialized, but controller polling could not start.");
                 SetControllerViewerUnavailable();
+                SetState(MacroState.Idle, "Controller unavailable: XInput polling could not start", HudPresentation.Error);
             }
         }
         else if (NativeEngine.IsAvailable)
@@ -396,6 +421,11 @@ public partial class MainForm : Form
             engineStatusLabel.ForeColor = ControllerUnavailableColor;
             controllerState.SetUnavailable("The native engine loaded, but initialization failed before controller preview could start.");
             SetControllerViewerUnavailable();
+            SetState(MacroState.Idle, "Controller unavailable: native initialization failed", HudPresentation.Error);
+        }
+        else
+        {
+            SetState(MacroState.Idle, NativeEngine.AvailabilityMessage, HudPresentation.Error);
         }
     }
 
@@ -549,10 +579,15 @@ public partial class MainForm : Form
         }
     }
 
-    public void ExecuteAction(MacroAction action)
+    public void ExecuteAction(MacroAction action) =>
+        ExecuteAction(new ActionTrigger(action, ActionInputSource.Keyboard));
+
+    public void ExecuteAction(ActionTrigger trigger)
     {
         if (_hotkeysSuspended)
             return;
+
+        MacroAction action = trigger.Action;
 
         if (_activeMacroType == MacroType.Recorder)
         {
@@ -570,13 +605,13 @@ public partial class MainForm : Form
                 ToggleMacro(MacroType.Autoclicker);
                 break;
             case MacroAction.TurboHold:
-                ToggleMacro(MacroType.TurboHold);
+                ToggleMacro(MacroType.TurboHold, trigger.Source == ActionInputSource.Controller);
                 break;
             case MacroAction.PureHold:
-                ToggleMacro(MacroType.PureHold);
+                ToggleMacro(MacroType.PureHold, trigger.Source == ActionInputSource.Controller);
                 break;
             case MacroAction.Recorder:
-                ToggleMacro(MacroType.Recorder);
+                ToggleMacro(MacroType.Recorder, trigger.Source == ActionInputSource.Controller);
                 break;
             case MacroAction.Playback:
                 HandlePlaybackHotkey();
@@ -591,7 +626,7 @@ public partial class MainForm : Form
     // MACRO CONTROL
     // ================================================================
 
-    private void ToggleMacro(MacroType type)
+    private void ToggleMacro(MacroType type, bool controllerTriggered = false)
     {
         if (_activeMacroType == type)
         {
@@ -623,22 +658,47 @@ public partial class MainForm : Form
                 HighlightButton(btnAutoclicker, true);
                 break;
             case MacroType.TurboHold:
+                if (controllerTriggered)
+                {
+                    SetState(
+                        MacroState.Idle,
+                        "Turbo Hold requires one-time setup in the foreground Macros window. Press Cancel to dismiss.",
+                        HudPresentation.Warning);
+                    break;
+                }
                 ActivateTurboHold();
                 break;
             case MacroType.PureHold:
+                if (controllerTriggered)
+                {
+                    SetState(
+                        MacroState.Idle,
+                        "Pure Hold requires one-time setup in the foreground Macros window. Press Cancel to dismiss.",
+                        HudPresentation.Warning);
+                    break;
+                }
                 ActivatePureHold();
                 break;
             case MacroType.Recorder:
                 _activeMacroType = type;
-                if (StartRecordingSession())
+                if (StartRecordingSession(controllerTriggered))
                 {
-                    SetState(MacroState.Recording, "Recording...");
+                    string status = _recordingControllerReady
+                        ? "Recording keyboard, mouse, and controller..."
+                        : "Recording keyboard and mouse (controller capture unavailable)...";
+                    SetState(
+                        MacroState.Recording,
+                        status,
+                        _recordingControllerReady ? HudPresentation.Compact : HudPresentation.Warning);
                     HighlightButton(btnRecorder, true);
                 }
                 else
                 {
                     _activeMacroType = null;
-                    SetState(MacroState.Idle, "Recorder unavailable");
+                    SetState(
+                        MacroState.Idle,
+                        string.IsNullOrWhiteSpace(_recordingStartError) ? "Recorder unavailable" : _recordingStartError,
+                        HudPresentation.Error);
                 }
                 break;
         }
@@ -719,7 +779,7 @@ public partial class MainForm : Form
 
         if (!NativeEngine.TryInit())
         {
-            SetState(MacroState.Idle, "Engine unavailable");
+            SetState(MacroState.Idle, NativeEngine.AvailabilityMessage, HudPresentation.Error);
             return;
         }
         NativeEngine.TrySetVJoyDeviceId((uint)_settings.VJoyDeviceId);
@@ -739,8 +799,6 @@ public partial class MainForm : Form
 
         bool hasControllerEvents = SlotHasControllerEvents(eventPath);
         string controllerOutputStatus = string.Empty;
-        bool controllerOutputReady = true;
-
         try
         {
             if (NativeEngine.TryIsPlaying())
@@ -751,11 +809,9 @@ public partial class MainForm : Form
 
             if (!TryPrepareControllerOutputForPlayback(
                     hasControllerEvents,
-                    requireVirtualXbox: hasControllerEvents,
-                    out controllerOutputReady,
                     out controllerOutputStatus))
             {
-                SetState(MacroState.Idle, controllerOutputStatus);
+                SetState(MacroState.Idle, controllerOutputStatus, HudPresentation.Error);
                 return;
             }
 
@@ -770,8 +826,6 @@ public partial class MainForm : Form
             string status = hasControllerEvents && !string.IsNullOrWhiteSpace(controllerOutputStatus)
                 ? $"Playing: {slot.Name} ({controllerOutputStatus})"
                 : $"Playing: {slot.Name}";
-            if (hasControllerEvents && !controllerOutputReady)
-                status = $"Playing: {slot.Name} ({controllerOutputStatus})";
             SetState(MacroState.Playing, status);
         }
         finally
@@ -803,11 +857,8 @@ public partial class MainForm : Form
 
     private bool TryPrepareControllerOutputForPlayback(
         bool hasControllerEvents,
-        bool requireVirtualXbox,
-        out bool outputReady,
         out string status)
     {
-        outputReady = true;
         status = string.Empty;
 
         if (!hasControllerEvents)
@@ -816,24 +867,33 @@ public partial class MainForm : Form
             return true;
         }
 
-        if (NativeEngine.TryUseVirtualXboxControllerOutput(out var error))
+        if (_settings.ControllerOutput == ControllerOutputType.VirtualXbox)
         {
-            status = "VirtualXbox";
-            return true;
-        }
+            if (NativeEngine.TryUseVirtualXboxControllerOutput(out var error))
+            {
+                status = "VirtualXbox";
+                return true;
+            }
 
-        if (requireVirtualXbox || _settings.ControllerOutput == ControllerOutputType.VirtualXbox)
-        {
-            outputReady = false;
             status = string.IsNullOrWhiteSpace(error)
-                ? "VirtualXbox unavailable"
-                : $"VirtualXbox unavailable: {error}";
+                ? "VirtualXbox backend unavailable"
+                : $"VirtualXbox backend unavailable: {error}";
             return false;
         }
 
-        NativeEngine.TryUseVJoyControllerOutput();
-        outputReady = NativeEngine.TryGetVJoyState(out var vJoyState) && vJoyState.Ready;
-        status = outputReady ? "vJoy" : "vJoy unavailable";
+        if (!NativeEngine.TryUseVJoyControllerOutput())
+        {
+            status = "vJoy backend unavailable: native engine rejected vJoy output";
+            return false;
+        }
+
+        if (!NativeEngine.TryGetVJoyState(out var vJoyState) || !vJoyState.Ready)
+        {
+            status = $"vJoy backend unavailable: device {_settings.VJoyDeviceId} is not ready";
+            return false;
+        }
+
+        status = $"vJoy {_settings.VJoyDeviceId}";
         return true;
     }
 
@@ -889,7 +949,7 @@ public partial class MainForm : Form
 
         if (!NativeEngine.TryInit())
         {
-            SetState(MacroState.Idle, "Engine unavailable");
+            SetState(MacroState.Idle, NativeEngine.AvailabilityMessage, HudPresentation.Error);
             return;
         }
 
@@ -901,7 +961,6 @@ public partial class MainForm : Form
         IntPtr buffer = IntPtr.Zero;
         uint count = 0;
         string outputStatus = string.Empty;
-        bool outputReady = true;
 
         try
         {
@@ -919,11 +978,9 @@ public partial class MainForm : Form
 
             if (!TryPrepareControllerOutputForPlayback(
                     hasControllerEvents: true,
-                    requireVirtualXbox: false,
-                    out outputReady,
                     out outputStatus))
             {
-                SetState(MacroState.Idle, outputStatus);
+                SetState(MacroState.Idle, outputStatus, HudPresentation.Error);
                 return;
             }
 
@@ -952,11 +1009,14 @@ public partial class MainForm : Form
                 string status = string.IsNullOrWhiteSpace(outputStatus)
                     ? "Controller pulse sent"
                     : $"Controller pulse sent ({outputStatus})";
-                if (!outputReady)
-                    status = string.IsNullOrWhiteSpace(outputStatus)
-                        ? "Controller pulse sent, output unavailable"
-                        : $"Controller pulse sent ({outputStatus})";
                 SetState(MacroState.Idle, status);
+                if (_activeProfile != null)
+                {
+                    _activeProfile.ControllerOutput = _settings.ControllerOutput;
+                    _activeProfile.VJoyDeviceId = _settings.VJoyDeviceId;
+                    _activeProfile.ControllerOutputVerified = true;
+                    _profileManager.SaveProfile(_activeProfile);
+                }
             }
         }
         finally
@@ -992,6 +1052,10 @@ public partial class MainForm : Form
         {
             NativeEngine.TryStopPlayback();
             StopSlotPlaybackTracking();
+            SetState(MacroState.Idle, "Idle");
+        }
+        else
+        {
             SetState(MacroState.Idle, "Idle");
         }
     }
@@ -1309,12 +1373,35 @@ public partial class MainForm : Form
         };
     }
 
-    private bool StartRecordingSession()
+    private bool StartRecordingSession(bool controllerTriggered)
     {
-        if (!NativeEngine.TryInit() || !NativeEngine.TryStartRecording())
+        _recordingStartError = string.Empty;
+        _recordingControllerExpected = controllerTriggered;
+        _recordingControllerReady = false;
+
+        if (!NativeEngine.TryInit())
+        {
+            _recordingStartError = NativeEngine.AvailabilityMessage;
             return false;
-        NativeEngine.TryStartPolling(4);
-        NativeEngine.TryStartControllerRecording();
+        }
+        if (!NativeEngine.TryStartRecording())
+        {
+            _recordingStartError = "Recorder unavailable: native recording could not start.";
+            return false;
+        }
+
+        bool pollingReady = NativeEngine.TryStartPolling(4);
+        _recordingControllerReady = pollingReady && NativeEngine.TryStartControllerRecording();
+        if (controllerTriggered && !_recordingControllerReady)
+        {
+            NativeEngine.TryStopControllerRecording();
+            NativeEngine.TryStopRecording();
+            NativeEngine.TryStartPolling(16);
+            _recordingStartError = pollingReady
+                ? "Controller recording could not start. Press Cancel, then check controller setup."
+                : "Controller polling could not start. Press Cancel, then check controller setup.";
+            return false;
+        }
         _recordingSawController = false;
 
         DisposeRecordingHook();
@@ -1331,6 +1418,7 @@ public partial class MainForm : Form
             NativeEngine.TryStopControllerRecording();
             NativeEngine.TryStopRecording();
             NativeEngine.TryStartPolling(16);
+            _recordingStartError = "Recorder unavailable: keyboard and mouse capture could not start.";
             return false;
         }
 
@@ -1350,18 +1438,21 @@ public partial class MainForm : Form
         ResetAllButtons();
 
         _recordingSawController = false;
+        bool controllerExpected = _recordingControllerExpected;
+        _recordingControllerExpected = false;
+        _recordingControllerReady = false;
 
         uint recordedCount = NativeEngine.TryGetRecordedEventCount();
         if (recordedCount == 0)
         {
-            SetState(MacroState.Idle, "Recording discarded");
+            SetState(MacroState.Idle, "Recording discarded: no input events captured", HudPresentation.Warning);
             return;
         }
 
         string slotName = _slotManager.AllocateRecordingName(DateTime.Now);
         if (!PersistRecordedEvents(slotName, out uint savedCount))
         {
-            SetState(MacroState.Idle, $"Save failed: {slotName}");
+            SetState(MacroState.Idle, $"Save failed: {slotName}", HudPresentation.Error);
             return;
         }
 
@@ -1369,12 +1460,35 @@ public partial class MainForm : Form
         if (savedCount == 0)
         {
             _slotManager.DeleteSlot(slotName);
-            SetState(MacroState.Idle, "Recording discarded");
+            SetState(MacroState.Idle, "Recording discarded: only the recorder chord was captured", HudPresentation.Warning);
             return;
         }
 
+        string eventPath = _slotManager.GetEventFilePath(slotName);
+        int controllerEventCount = SlotManager.CountControllerEvents(eventPath);
+        _slotManager.SaveSlot(new MacroSlot
+        {
+            Name = slotName,
+            EventCount = (int)savedCount,
+            ControllerEventCount = controllerEventCount,
+            CoordMode = "screen",
+            Recorded = DateTime.Now.ToString("yyyy-MM-dd")
+        });
         RefreshSlotList(slotName);
-        SetState(MacroState.Idle, $"Saved: {slotName} ({savedCount} events)");
+        if (controllerExpected && controllerEventCount == 0)
+        {
+            SetState(
+                MacroState.Idle,
+                $"Saved partial: {slotName} ({savedCount} events, 0 controller). Playback may not control the game.",
+                HudPresentation.Warning);
+        }
+        else
+        {
+            SetState(
+                MacroState.Idle,
+                $"Saved: {slotName} ({savedCount} events, {controllerEventCount} controller)",
+                HudPresentation.SavedActions);
+        }
     }
 
     private bool PersistRecordedEvents(string slotName, out uint savedCount)
@@ -1394,6 +1508,7 @@ public partial class MainForm : Form
             {
                 Name = slotName,
                 EventCount = (int)count,
+                ControllerEventCount = SlotManager.CountControllerEvents(eventPath),
                 CoordMode = "screen",
                 Recorded = DateTime.Now.ToString("yyyy-MM-dd")
             });
@@ -1501,6 +1616,7 @@ public partial class MainForm : Form
             {
                 Name = slotName,
                 EventCount = (int)remaining,
+                ControllerEventCount = SlotManager.CountControllerEvents(eventPath),
                 CoordMode = "screen",
                 Recorded = DateTime.Now.ToString("yyyy-MM-dd")
             });
@@ -1647,7 +1763,10 @@ public partial class MainForm : Form
         _statusOverlayTimer.Tick += (_, _) => AdvanceStatusOverlay();
     }
 
-    private void SetState(MacroState state, string displayText)
+    private void SetState(
+        MacroState state,
+        string displayText,
+        HudPresentation presentation = HudPresentation.Compact)
     {
         var previousState = _currentState;
         _currentState = state;
@@ -1667,7 +1786,10 @@ public partial class MainForm : Form
             ShowStatusOverlay(displayText, state);
         }
 
-        StatusChanged?.Invoke(this, new MacroStatusChangedEventArgs(displayText, CurrentProfileName));
+        StatusChanged?.Invoke(this, new MacroStatusChangedEventArgs(
+            displayText,
+            CurrentProfileName,
+            presentation));
     }
 
     private void ShowStatusOverlay(string text, MacroState state)

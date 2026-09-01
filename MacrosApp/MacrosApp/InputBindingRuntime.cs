@@ -70,7 +70,7 @@ public sealed class InputBindingRuntime : NativeWindow, IDisposable
     private readonly System.Windows.Forms.Timer _controllerTimer;
     private bool _disposed;
 
-    public event Action<MacroAction>? ActionTriggered;
+    public event Action<ActionTrigger>? ActionTriggered;
 
     public InputBindingRuntime(AppSettings settings)
     {
@@ -136,7 +136,7 @@ public sealed class InputBindingRuntime : NativeWindow, IDisposable
                 _keysDown.Add(key);
 
             foreach (MacroAction action in _matcher.EvaluateKeyboard(_keysDown))
-                ActionTriggered?.Invoke(action);
+                ActionTriggered?.Invoke(new ActionTrigger(action, ActionInputSource.Keyboard));
         }
         finally
         {
@@ -167,7 +167,7 @@ public sealed class InputBindingRuntime : NativeWindow, IDisposable
             : Array.Empty<ControllerControl>();
 
         foreach (MacroAction action in _matcher.EvaluateController(down))
-            ActionTriggered?.Invoke(action);
+            ActionTriggered?.Invoke(new ActionTrigger(action, ActionInputSource.Controller, 0));
     }
 
     public void Dispose()

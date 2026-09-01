@@ -7,22 +7,34 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $expectedCommit = '05226d8e50eb619bf4ce394f732536aa0cb7e9d7'
-$expectedBlob = 'a2d6db61b6fd5d503bac37f2463e72507fb2fe16'
-$legacyRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$toolsRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$repoRoot = Split-Path -Parent (Split-Path -Parent $toolsRoot)
+$legacyRoot = Join-Path $repoRoot 'legacy\frozen-05226d8'
+$manifestPath = Join-Path $legacyRoot 'manifest.json'
 $scriptPath = Join-Path $legacyRoot 'Macros.ahk'
 $ahkPath = 'C:\Program Files\AutoHotkey\v1.1.37.02\AutoHotkeyU64.exe'
 
 function Assert-LegacyIdentity {
-    if (-not (Test-Path -LiteralPath (Join-Path $legacyRoot '.git'))) {
-        throw "Legacy launcher must remain beside the detached Macros-Script worktree: $legacyRoot"
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        throw "Frozen legacy manifest was not found: $manifestPath"
     }
-    $commit = (& git -C $legacyRoot rev-parse HEAD 2>&1).Trim()
-    if ($LASTEXITCODE -ne 0 -or $commit -ne $expectedCommit) {
-        throw "Legacy worktree commit mismatch. Expected $expectedCommit; found $commit."
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    if ($manifest.sourceCommit -ne $expectedCommit -or -not $manifest.immutable) {
+        throw "Frozen legacy manifest identity mismatch. Expected immutable commit $expectedCommit."
     }
-    $blob = (& git -C $legacyRoot hash-object -- $scriptPath 2>&1).Trim()
-    if ($LASTEXITCODE -ne 0 -or $blob -ne $expectedBlob) {
-        throw "Macros.ahk blob mismatch. Expected $expectedBlob; found $blob."
+    foreach ($file in $manifest.files) {
+        $relativePath = ([string]$file.path).Replace('/', [IO.Path]::DirectorySeparatorChar)
+        $path = Join-Path $legacyRoot $relativePath
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw "Frozen legacy runtime file is missing: $relativePath"
+        }
+        $actualHash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actualHash -ne ([string]$file.sha256).ToLowerInvariant()) {
+            throw "Frozen legacy runtime hash mismatch for $relativePath."
+        }
+        if ((Get-Item -LiteralPath $path).Length -ne [long]$file.bytes) {
+            throw "Frozen legacy runtime size mismatch for $relativePath."
+        }
     }
     if (-not (Test-Path -LiteralPath $ahkPath -PathType Leaf)) {
         throw "Required AutoHotkey v1 runtime was not found: $ahkPath"
@@ -141,17 +153,17 @@ if ($ShutdownProbeProcessId -gt 0) {
     if (-not (Request-AutoHotkeyShutdown -ProcessId $ShutdownProbeProcessId)) {
         throw "No hidden AutoHotkey control window was found for probe PID $ShutdownProbeProcessId."
     }
-    exit 0
+    return
 }
 if ($ValidateOnly) {
     [pscustomobject]@{
         Commit = $expectedCommit
-        Blob = $expectedBlob
+        Manifest = $manifestPath
         Script = $scriptPath
         Runtime = $ahkPath
         RuntimeVersion = (Get-Item -LiteralPath $ahkPath).VersionInfo.FileVersion
     }
-    exit 0
+    return
 }
 
 $otherRuntimes = @(Get-OtherMacrosRuntimes)

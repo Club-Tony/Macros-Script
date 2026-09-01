@@ -77,7 +77,14 @@ public class ProfileManager
                         break;
                     case "controlleroutput":
                         if (Enum.TryParse<ControllerOutputType>(val, true, out var output))
+                        {
                             current.ControllerOutput = output;
+                            current.HasControllerOutputSelection = true;
+                        }
+                        break;
+                    case "controlleroutputverified":
+                        if (bool.TryParse(val, out bool verified))
+                            current.ControllerOutputVerified = verified;
                         break;
                 }
             }
@@ -162,6 +169,8 @@ public class ProfileManager
             writer.WriteLine($"vJoyDeviceId={profile.VJoyDeviceId}");
             writer.WriteLine($"vJoyPovMode={profile.VJoyPovMode}");
             writer.WriteLine($"ControllerOutput={profile.ControllerOutput}");
+            writer.WriteLine($"ControllerOutputVerified={profile.ControllerOutputVerified}");
+            profile.HasControllerOutputSelection = true;
 
             if (!string.IsNullOrEmpty(profile.ProcessName))
                 writer.WriteLine($"Process={profile.ProcessName}");

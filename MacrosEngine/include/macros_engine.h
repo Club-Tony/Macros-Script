@@ -16,6 +16,15 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+/* Managed and native components must agree on this ABI.  Bump whenever an
+ * exported contract changes in a way that an older DLL cannot satisfy. */
+#define MACROS_ENGINE_ABI_VERSION 0x00020000u
+
+#define MACROS_ENGINE_CAP_CONTROLLER_RECORDING 0x00000001u
+#define MACROS_ENGINE_CAP_VJOY_OUTPUT           0x00000002u
+#define MACROS_ENGINE_CAP_CALLBACK_OUTPUT       0x00000004u
+#define MACROS_ENGINE_CAP_TEST_SNAPSHOT_FEED    0x00000008u
+
 /* ----------------------------------------------------------------
  * Controller state (mirrors XINPUT_GAMEPAD layout)
  * ---------------------------------------------------------------- */
@@ -104,6 +113,10 @@ ENGINE_API bool        Engine_StartControllerRecording(void);
 ENGINE_API void        Engine_StopControllerRecording(void);
 ENGINE_API bool        Engine_IsRecordingController(void);
 
+/* Test-only snapshot entry point.  It deliberately feeds the same
+ * release-arming, normalization and diff path used by the live poller. */
+ENGINE_API bool        Engine_TestFeedControllerSnapshot(const ControllerState *state);
+
 /* ----------------------------------------------------------------
  * Recording
  * ---------------------------------------------------------------- */
@@ -164,5 +177,7 @@ ENGINE_API bool        Engine_SaveEventsToFile(const char       *path,
  * Version
  * ---------------------------------------------------------------- */
 ENGINE_API const char* Engine_GetVersion(void);
+ENGINE_API uint32_t    Engine_GetAbiVersion(void);
+ENGINE_API uint32_t    Engine_GetCapabilities(void);
 
 #endif /* MACROS_ENGINE_H */

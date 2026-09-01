@@ -106,7 +106,7 @@ if (!result.Success)
 
 try
 {
-    RunTrayLifecycleSmoke(sourceRoot, workspaceRoot);
+    RunTrayLifecycleSmoke(workspaceRoot);
 }
 catch (Exception ex)
 {
@@ -133,13 +133,13 @@ catch (UnauthorizedAccessException)
 }
 Console.WriteLine("Smoke test passed.");
 
-static void RunTrayLifecycleSmoke(string sourceRoot, string workspaceRoot)
+static void RunTrayLifecycleSmoke(string workspaceRoot)
 {
     string settingsPath = Path.Combine(workspaceRoot, "lifecycle-settings.json");
     var settings = new AppSettings { OnboardingComplete = true, StartHidden = true };
     new AppSettingsStore(settingsPath).Save(settings);
 
-    string appPath = Path.Combine(sourceRoot, "MacrosApp", "MacrosApp", "bin", "Debug", "net8.0-windows", "MacrosApp.exe");
+    string appPath = Path.Combine(AppContext.BaseDirectory, "MacrosApp.exe");
     if (!File.Exists(appPath))
         throw new FileNotFoundException("Build MacrosApp before running the smoke harness.", appPath);
 
@@ -147,7 +147,7 @@ static void RunTrayLifecycleSmoke(string sourceRoot, string workspaceRoot)
     var startInfo = new ProcessStartInfo(appPath)
     {
         UseShellExecute = false,
-        WorkingDirectory = sourceRoot
+        WorkingDirectory = workspaceRoot
     };
     startInfo.Environment["MACROSAPP_SETTINGS_PATH"] = settingsPath;
     startInfo.Environment["MACROSAPP_INSTANCE_SUFFIX"] = suffix;
@@ -194,6 +194,8 @@ static SmokeResult RunSmoke(MainForm form, string workspaceRoot)
     {
         if (!palette.UsesNoActivateStyle)
             return SmokeResult.Fail(slotName, "Palette is missing WS_EX_NOACTIVATE.", workspaceRoot);
+        if (palette.UsesLayeredStyle)
+            return SmokeResult.Fail(slotName, "Palette must not use the fragile WS_EX_LAYERED path.", workspaceRoot);
 
         sentinel.Show();
         sentinel.Activate();
@@ -212,7 +214,7 @@ static SmokeResult RunSmoke(MainForm form, string workspaceRoot)
         palette.UpdateStatus("Recording...", "Default");
         if (!palette.ShouldStayVisible)
             return SmokeResult.Fail(slotName, "Recording status should keep the HUD visible.", workspaceRoot);
-        palette.UpdateStatus("Saved: recording-1 (2 events)", "Default");
+        palette.UpdateStatus("Saved: recording-1 (2 events)", "Default", HudPresentation.SavedActions);
         if (palette.ShouldStayVisible || !palette.ShouldToast)
             return SmokeResult.Fail(slotName, "Saved status should toast instead of staying sticky.", workspaceRoot);
         palette.UpdateStatus("Idle", "Default");
@@ -225,6 +227,12 @@ static SmokeResult RunSmoke(MainForm form, string workspaceRoot)
     {
         return SmokeResult.Fail(slotName, "Native engine was not available.", workspaceRoot);
     }
+    if (!NativeEngine.IsCompatibleBuild(NativeEngine.ExpectedAbiVersion, NativeEngine.RequiredCapabilities) ||
+        NativeEngine.IsCompatibleBuild(0x00010000, NativeEngine.RequiredCapabilities))
+    {
+        return SmokeResult.Fail(slotName, "Stale native ABI rejection policy failed.", workspaceRoot);
+    }
+    Console.WriteLine("native_identity=" + NativeEngine.AvailabilityMessage);
 
     // B. vJoy state surface check: confirms the SetVJoyDeviceId / GetVJoyState
     // P/Invoke wrappers round-trip without throwing. Catches marshalling
@@ -336,6 +344,10 @@ static SmokeResult RunSmoke(MainForm form, string workspaceRoot)
             workspaceRoot);
     }
     Console.WriteLine("controller_row=" + controllerLine);
+    if (!File.ReadAllText(iniPath).Contains("controller_event_count=1", StringComparison.OrdinalIgnoreCase))
+    {
+        return SmokeResult.Fail(slotName, "Slot metadata did not preserve controller event count.", workspaceRoot);
+    }
 
     var settingsField = typeof(MainForm).GetField(
         "_settings",
@@ -346,6 +358,7 @@ static SmokeResult RunSmoke(MainForm form, string workspaceRoot)
     }
 
     settings.LoopCount = 1;
+    settings.ControllerOutput = ControllerOutputType.VJoy;
 
     var playSlotMethod = typeof(MainForm).GetMethod(
         "PlaySlot",
@@ -366,10 +379,10 @@ static SmokeResult RunSmoke(MainForm form, string workspaceRoot)
     playSlotMethod.Invoke(form, new object[] { new MacroSlot { Name = slotName } });
 
     string startStatus = statusLabel.Text;
-    bool virtualXboxMissing = startStatus.Contains("VirtualXbox unavailable", StringComparison.Ordinal);
-    if (virtualXboxMissing)
+    bool selectedBackendUnavailable = startStatus.Contains("vJoy backend unavailable", StringComparison.Ordinal);
+    if (selectedBackendUnavailable)
     {
-        Console.WriteLine("virtualxbox_missing_hud=" + startStatus);
+        Console.WriteLine("vjoy_missing_hud=" + startStatus);
     }
     else if (!startStatus.StartsWith("Playing:", StringComparison.Ordinal))
     {
@@ -381,6 +394,13 @@ static SmokeResult RunSmoke(MainForm form, string workspaceRoot)
             EventFileExists = eventFileExists
         };
     }
+    else if (!startStatus.Contains("vJoy 1", StringComparison.Ordinal) ||
+             startStatus.Contains("VirtualXbox", StringComparison.Ordinal))
+    {
+        return SmokeResult.Fail(slotName,
+            "Playback substituted a backend instead of honoring the vJoy profile: " + startStatus,
+            workspaceRoot);
+    }
 
     var stopwatch = Stopwatch.StartNew();
     string finalStatus;
@@ -390,7 +410,7 @@ static SmokeResult RunSmoke(MainForm form, string workspaceRoot)
     bool success;
     string failureReason;
 
-    if (virtualXboxMissing)
+    if (selectedBackendUnavailable)
     {
         finalStatus = startStatus;
         finalState = typeof(MainForm).GetField(
@@ -401,7 +421,7 @@ static SmokeResult RunSmoke(MainForm form, string workspaceRoot)
             BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(form) ?? true;
         enginePlaying = NativeEngine.TryIsPlaying();
         success = finalState == "Idle" && !slotPlaybackActive && !enginePlaying;
-        failureReason = success ? string.Empty : "VirtualXbox-missing HUD left playback running.";
+        failureReason = success ? string.Empty : "vJoy-missing HUD left playback running.";
     }
     else
     {
@@ -513,6 +533,40 @@ static SmokeResult RunSmoke(MainForm form, string workspaceRoot)
     Console.WriteLine("autosave_status=" + autosaveStatus);
     Console.WriteLine("autosave_file=" + Path.GetFileName(savedPath));
 
+    NativeEngine.TryStopPolling();
+    Environment.SetEnvironmentVariable("MACROS_DISABLE_XINPUT", "1");
+    form.ExecuteAction(new ActionTrigger(MacroAction.Recorder, ActionInputSource.Controller, 0));
+    Application.DoEvents();
+    string controllerStartFailure = statusLabel.Text;
+    Environment.SetEnvironmentVariable("MACROS_DISABLE_XINPUT", null);
+    NativeEngine.TryStartPolling(16);
+    if (!controllerStartFailure.Contains("Controller polling could not start", StringComparison.OrdinalIgnoreCase))
+    {
+        return SmokeResult.Fail(slotName,
+            "Controller-triggered recorder did not surface startup failure: " + controllerStartFailure,
+            workspaceRoot);
+    }
+    Console.WriteLine("controller_start_failure_status=" + controllerStartFailure);
+
+    form.ExecuteAction(new ActionTrigger(MacroAction.Recorder, ActionInputSource.Controller, 0));
+    Application.DoEvents();
+    if (!statusLabel.Text.StartsWith("Recording", StringComparison.OrdinalIgnoreCase))
+    {
+        return SmokeResult.Fail(slotName, "Controller-triggered recording did not start: " + statusLabel.Text, workspaceRoot);
+    }
+    NativeEngine.TryRecordKeyEvent(down: true, (ushort)Keys.C, 0);
+    NativeEngine.TryRecordKeyEvent(down: false, (ushort)Keys.C, 0);
+    form.ExecuteAction(new ActionTrigger(MacroAction.Recorder, ActionInputSource.Controller, 0));
+    Application.DoEvents();
+    if (!statusLabel.Text.StartsWith("Saved partial:", StringComparison.Ordinal) ||
+        !statusLabel.Text.Contains("0 controller", StringComparison.Ordinal))
+    {
+        return SmokeResult.Fail(slotName,
+            "Zero-controller-event recording did not show the warning HUD state: " + statusLabel.Text,
+            workspaceRoot);
+    }
+    Console.WriteLine("zero_controller_warning_status=" + statusLabel.Text);
+
     if (Environment.GetEnvironmentVariable("MACROS_SMOKE_VIRTUAL_XBOX") == "1")
     {
         settings.ControllerOutput = ControllerOutputType.VirtualXbox;
@@ -604,6 +658,7 @@ static void RunSettingsAndBindingSmoke(string workspaceRoot)
     Require(!settings.OnboardingComplete, "first run starts incomplete");
     Require(settings.Bindings[MacroAction.Palette].KeyboardText == "Ctrl + Shift + Alt + Z", "safe launch default");
     Require(settings.Bindings[MacroAction.Palette].Controller.Count == 0, "controller launch default unset");
+    Require(settings.Bindings[MacroAction.Cancel].Controller.SequenceEqual(AppSettings.RecommendedCancelChord()), "dedicated controller cancel default");
 
     settings.OnboardingComplete = true; // Covers Continue/Later persistence outcome.
     settings.Bindings[MacroAction.Palette].Controller = new List<ControllerControl>
@@ -627,6 +682,13 @@ static void RunSettingsAndBindingSmoke(string workspaceRoot)
     loaded = store.Load();
     Require(loaded.SchemaVersion == AppSettings.CurrentSchemaVersion, "older settings schema migrates");
     Require(loaded.Bindings[MacroAction.Cancel].Keyboard.SequenceEqual(new[] { Keys.Escape }), "missing action migrates to default");
+    Require(loaded.Bindings[MacroAction.Cancel].Controller.SequenceEqual(AppSettings.RecommendedCancelChord()), "controller-enabled settings receive non-conflicting cancel chord");
+
+    var conflict = new AppSettings { SchemaVersion = 1 };
+    conflict.Bindings[MacroAction.Cancel].Controller.Clear();
+    conflict.Bindings[MacroAction.Playback].Controller = AppSettings.RecommendedCancelChord();
+    conflict.Normalize();
+    Require(conflict.Bindings[MacroAction.Cancel].Controller.Count == 0, "conflicting cancel chord requires setup instead of duplication");
 
     loaded.Bindings[MacroAction.SlashMacro].Keyboard = new List<Keys> { Keys.A, Keys.B };
     var matcher = new BindingMatcher(loaded);

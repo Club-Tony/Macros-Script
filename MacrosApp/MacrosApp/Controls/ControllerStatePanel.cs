@@ -1,3 +1,5 @@
+using MacrosApp.Models;
+
 namespace MacrosApp.Controls;
 
 public sealed class ControllerConnectionChangedEventArgs : EventArgs
@@ -106,6 +108,83 @@ public class ControllerStatePanel : UserControl
         MinimumSize = new Size(320, 180);
         MouseMove += ControllerStatePanel_MouseMove;
         MouseLeave += (_, _) => RestoreBaseToolTip();
+    }
+
+    public static void DrawChordRenderer(
+        Graphics graphics,
+        Rectangle bounds,
+        IReadOnlyCollection<ControllerControl> highlighted,
+        float pulse)
+    {
+        bool On(ControllerControl control) => highlighted.Contains(control);
+        float glow = 0.45f + Math.Clamp(pulse, 0f, 1f) * 0.55f;
+        Color on = Color.FromArgb(255, (int)(90 + 70 * glow), (int)(180 + 55 * glow), 255);
+        Color off = Color.FromArgb(78, 84, 96);
+        using var body = new SolidBrush(Color.FromArgb(46, 49, 58));
+        using var edge = new Pen(Color.FromArgb(88, 95, 110), 1.2f);
+        using var labelFont = new Font("Segoe UI", 6.7f, FontStyle.Bold);
+        using var labelBrush = new SolidBrush(Color.FromArgb(235, 238, 244));
+
+        Rectangle shell = new(bounds.X + 22, bounds.Y + 17, bounds.Width - 44, bounds.Height - 25);
+        graphics.FillEllipse(body, bounds.X + 4, bounds.Y + 22, 58, bounds.Height - 28);
+        graphics.FillEllipse(body, bounds.Right - 62, bounds.Y + 22, 58, bounds.Height - 28);
+        graphics.FillRectangle(body, shell);
+        graphics.DrawRectangle(edge, shell);
+
+        DrawPill("LT", bounds.X + 20, bounds.Y + 1, On(ControllerControl.LeftTrigger));
+        DrawPill("LB", bounds.X + 54, bounds.Y + 1, On(ControllerControl.LeftShoulder));
+        DrawPill("RB", bounds.Right - 84, bounds.Y + 1, On(ControllerControl.RightShoulder));
+        DrawPill("RT", bounds.Right - 50, bounds.Y + 1, On(ControllerControl.RightTrigger));
+        DrawCircle("Y", bounds.Right - 43, bounds.Y + 28, On(ControllerControl.Y));
+        DrawCircle("B", bounds.Right - 27, bounds.Y + 42, On(ControllerControl.B));
+        DrawCircle("A", bounds.Right - 43, bounds.Y + 56, On(ControllerControl.A));
+        DrawCircle("X", bounds.Right - 59, bounds.Y + 42, On(ControllerControl.X));
+        DrawStick(bounds.X + 43, bounds.Y + 47, On(ControllerControl.LeftThumb));
+        DrawStick(bounds.Right - 79, bounds.Y + 57, On(ControllerControl.RightThumb));
+        DrawPill("Bk", bounds.X + bounds.Width / 2 - 30, bounds.Y + 28, On(ControllerControl.Back));
+        DrawPill("St", bounds.X + bounds.Width / 2 + 4, bounds.Y + 28, On(ControllerControl.Start));
+
+        int dpadX = bounds.X + 76;
+        int dpadY = bounds.Y + 55;
+        using (var dpadBrush = new SolidBrush(
+            On(ControllerControl.DPadUp) || On(ControllerControl.DPadDown) ||
+            On(ControllerControl.DPadLeft) || On(ControllerControl.DPadRight) ? on : off))
+        {
+            graphics.FillRectangle(dpadBrush, dpadX - 4, dpadY - 15, 8, 30);
+            graphics.FillRectangle(dpadBrush, dpadX - 15, dpadY - 4, 30, 8);
+        }
+
+        void DrawPill(string label, int x, int y, bool active)
+        {
+            var rect = new Rectangle(x, y, 28, 13);
+            using var fill = new SolidBrush(active ? on : off);
+            graphics.FillRectangle(fill, rect);
+            graphics.DrawRectangle(edge, rect);
+            var size = graphics.MeasureString(label, labelFont);
+            graphics.DrawString(label, labelFont, labelBrush, x + (28 - size.Width) / 2, y - 1);
+        }
+
+        void DrawCircle(string label, int x, int y, bool active)
+        {
+            const int size = 17;
+            using var fill = new SolidBrush(active ? on : off);
+            if (active)
+            {
+                using var glowPen = new Pen(Color.FromArgb((int)(120 * glow), on), 4f);
+                graphics.DrawEllipse(glowPen, x - 2, y - 2, size + 4, size + 4);
+            }
+            graphics.FillEllipse(fill, x, y, size, size);
+            graphics.DrawEllipse(edge, x, y, size, size);
+            var textSize = graphics.MeasureString(label, labelFont);
+            graphics.DrawString(label, labelFont, labelBrush, x + (size - textSize.Width) / 2, y + 1);
+        }
+
+        void DrawStick(int x, int y, bool active)
+        {
+            using var fill = new SolidBrush(active ? on : off);
+            graphics.FillEllipse(fill, x, y, 20, 20);
+            graphics.DrawEllipse(edge, x, y, 20, 20);
+        }
     }
 
     public void StartRefresh()

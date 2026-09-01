@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "05226d8e50eb619bf4ce394f732536aa0cb7e9d7",
+  "runtime": "AutoHotkey v1.1.37.02 x64",
+  "immutable": true,
+  "files": [
+    {
+      "path": "Macros.ahk",
+      "sha256": "50816cb0ab89c50a1bf0e32e90eb2a388ab112b1a873eb3ff3030a73466d95a5",
+      "gitBlob": "a2d6db61b6fd5d503bac37f2463e72507fb2fe16",
+      "bytes": 65323
+    },
+    {
+      "path": "Lib/Debug.ahk",
+      "sha256": "f0b272a31483503fb07d9ddc903c23be029a312264d737886d444aafd332013a",
+      "gitBlob": "2be970d67ee5c855567829f2c6a6396c9e7f9ab8",
+      "bytes": 2897
+    },
+    {
+      "path": "Lib/Recorder_Keys.ahk",
+      "sha256": "3fd25f8749f567ec56172cf5b50fc97d4a8a18ccdd966af6449f7cef57d6d405",
+      "gitBlob": "d8361f462d56dfb60722fd16ca0b2c3b1646e6c7",
+      "bytes": 10469
+    },
+    {
+      "path": "Lib/VJoy_lib.ahk",
+      "sha256": "f2bb9d6f2e4d7b48cd8ee09436849b5662b1c8a38f0a701a0ab0938a776a5b16",
+      "gitBlob": "fcefbbc3d8ab447a45b51c1ad8ec34494211dd38",
+      "bytes": 27773
+    },
+    {
+      "path": "Lib/XInput.ahk",
+      "sha256": "82444ad816fce185bb96baea6d97026f5e2b3ad1e64ebeb655a38e7cf8f4c7a1",
+      "gitBlob": "d015cfeedd98c3799d415fe3bbf1aacb22f24c49",
+      "bytes": 17095
+    }
+  ]
+}

@@ -143,6 +143,32 @@ static void apply_deadzone(ControllerState *cs, uint32_t idx)
 /* quantize_thumb, quantize_trigger, normalize_for_recording, states_equal,
  * and state_is_neutral are now in xinput_diff.h (static inline). */
 
+static bool process_controller_snapshot(const ControllerState *sample)
+{
+    if (!g_controller_recording || !sample || !sample->connected)
+        return false;
+
+    ControllerState normalized = normalize_for_recording(sample);
+
+    if (!controller_record_after_release(&g_record_wait_release, &normalized))
+        return false;
+
+    if (!g_record_prev_valid) {
+        g_record_prev_state = normalized;
+        g_record_prev_valid = true;
+        if (!state_is_neutral(&normalized))
+            return Engine_RecordControllerEvent(&normalized);
+        return false;
+    }
+
+    if (!states_equal(&normalized, &g_record_prev_state)) {
+        g_record_prev_state = normalized;
+        return Engine_RecordControllerEvent(&normalized);
+    }
+
+    return false;
+}
+
 static void maybe_record_controller_snapshot(void)
 {
     if (!g_controller_recording)
@@ -165,23 +191,7 @@ static void maybe_record_controller_snapshot(void)
     if (!found)
         return;
 
-    ControllerState normalized = normalize_for_recording(&sample);
-
-    if (!controller_record_after_release(&g_record_wait_release, &normalized))
-        return;
-
-    if (!g_record_prev_valid) {
-        g_record_prev_state = normalized;
-        g_record_prev_valid = true;
-        if (!state_is_neutral(&normalized))
-            Engine_RecordControllerEvent(&normalized);
-        return;
-    }
-
-    if (!states_equal(&normalized, &g_record_prev_state)) {
-        g_record_prev_state = normalized;
-        Engine_RecordControllerEvent(&normalized);
-    }
+    (void)process_controller_snapshot(&sample);
 }
 
 /* ================================================================
@@ -229,6 +239,10 @@ static DWORD WINAPI poll_thread_proc(LPVOID param)
 ENGINE_API bool Engine_StartPolling(uint32_t interval_ms)
 {
     if (!Engine_IsInitialized())
+        return false;
+
+    char disabled[2] = {0};
+    if (GetEnvironmentVariableA("MACROS_DISABLE_XINPUT", disabled, sizeof(disabled)) > 0)
         return false;
 
     /* Allow a later StartPolling call to retune the interval without bouncing
@@ -305,7 +319,10 @@ ENGINE_API bool Engine_StartControllerRecording(void)
     if (!Engine_IsInitialized())
         return false;
 
-    if (!g_poll_running && !Engine_StartPolling(16))
+    char test_feed[2] = {0};
+    bool test_feed_only = GetEnvironmentVariableA(
+        "MACROS_TEST_CONTROLLER_FEED", test_feed, sizeof(test_feed)) > 0;
+    if (!test_feed_only && !g_poll_running && !Engine_StartPolling(16))
         return false;
 
     EnterCriticalSection(&g_engine_cs);
@@ -335,6 +352,13 @@ ENGINE_API bool Engine_IsRecordingController(void)
     if (!Engine_IsInitialized())
         return false;
     return g_controller_recording;
+}
+
+ENGINE_API bool Engine_TestFeedControllerSnapshot(const ControllerState *state)
+{
+    if (!Engine_IsInitialized() || !Engine_IsRecording() || !state)
+        return false;
+    return process_controller_snapshot(state);
 }
 
 /* ================================================================

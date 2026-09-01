@@ -14,6 +14,17 @@ public enum MacroAction
     Cancel
 }
 
+public enum ActionInputSource
+{
+    Keyboard,
+    Controller
+}
+
+public readonly record struct ActionTrigger(
+    MacroAction Action,
+    ActionInputSource Source,
+    int? ControllerIndex = null);
+
 public enum ControllerControl
 {
     DPadUp,
@@ -58,7 +69,7 @@ public sealed class ActionBinding
 
 public sealed class AppSettings
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
 
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
     public bool OnboardingComplete { get; set; }
@@ -68,9 +79,12 @@ public sealed class AppSettings
 
     public void Normalize()
     {
-        SchemaVersion = CurrentSchemaVersion;
+        int loadedSchemaVersion = SchemaVersion;
         Runtime ??= new MacroSettings();
         Bindings ??= new Dictionary<MacroAction, ActionBinding>();
+        bool migrateControllerCancel = loadedSchemaVersion < 2 &&
+            (!Bindings.TryGetValue(MacroAction.Cancel, out var loadedCancel) ||
+             loadedCancel == null || loadedCancel.Controller.Count == 0);
         foreach (MacroAction action in Enum.GetValues<MacroAction>())
         {
             if (!Bindings.TryGetValue(action, out ActionBinding? binding) || binding == null)
@@ -85,6 +99,17 @@ public sealed class AppSettings
                 binding.Controller = binding.Controller.Distinct().Order().ToList();
             }
         }
+
+        if (migrateControllerCancel)
+        {
+            Bindings[MacroAction.Cancel].Controller.Clear();
+            var recommendedCancel = RecommendedCancelChord();
+            if (Bindings.Any(pair => pair.Key != MacroAction.Cancel && pair.Value.Controller.Count > 0) &&
+                !HasControllerDuplicate(MacroAction.Cancel, recommendedCancel))
+                Bindings[MacroAction.Cancel].Controller = recommendedCancel;
+        }
+
+        SchemaVersion = CurrentSchemaVersion;
     }
 
     public void Reset(MacroAction action) => Bindings[action] = DefaultBinding(action);
@@ -126,8 +151,23 @@ public sealed class AppSettings
             MacroAction.Cancel => new[] { Keys.Escape },
             _ => Array.Empty<Keys>()
         };
-        return new ActionBinding { Keyboard = keyboard.ToList() };
+        return new ActionBinding
+        {
+            Keyboard = keyboard.ToList(),
+            Controller = action == MacroAction.Cancel
+                ? RecommendedCancelChord()
+                : new List<ControllerControl>()
+        };
     }
+
+    public static List<ControllerControl> RecommendedCancelChord() => new()
+    {
+        ControllerControl.LeftShoulder,
+        ControllerControl.RightShoulder,
+        ControllerControl.LeftTrigger,
+        ControllerControl.RightTrigger,
+        ControllerControl.Y
+    };
 }
 
 public static class BindingText

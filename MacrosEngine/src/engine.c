@@ -115,5 +115,18 @@ ENGINE_API bool Engine_IsInitialized(void)
  * ---------------------------------------------------------------- */
 ENGINE_API const char* Engine_GetVersion(void)
 {
-    return "MacrosEngine 1.0.0";
+    return "MacrosEngine 2.0.0 (controller-recorder-v2)";
+}
+
+ENGINE_API uint32_t Engine_GetAbiVersion(void)
+{
+    return MACROS_ENGINE_ABI_VERSION;
+}
+
+ENGINE_API uint32_t Engine_GetCapabilities(void)
+{
+    return MACROS_ENGINE_CAP_CONTROLLER_RECORDING |
+           MACROS_ENGINE_CAP_VJOY_OUTPUT |
+           MACROS_ENGINE_CAP_CALLBACK_OUTPUT |
+           MACROS_ENGINE_CAP_TEST_SNAPSHOT_FEED;
 }
